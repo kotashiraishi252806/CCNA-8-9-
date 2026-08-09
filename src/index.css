@@ -1,0 +1,47 @@
+:root {
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --surface-hover: #f0f1f4;
+  --border: #e2e4e9;
+  --text: #1a1c22;
+  --text-muted: #6b7080;
+  --input-bg: #ffffff;
+  --accent: #3762e0;
+  --accent-soft: #e8edfc;
+  --success: #1a8a4a;
+  --success-soft: #e4f6ea;
+  --danger: #c8372f;
+  --danger-soft: #fbe8e7;
+
+  font-family: system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14161c;
+    --surface: #1c1f27;
+    --surface-hover: #262a34;
+    --border: #2c2f3a;
+    --text: #e8e9ed;
+    --text-muted: #8b8f9e;
+    --input-bg: #14161c;
+    --accent: #5b82f5;
+    --accent-soft: #22284a;
+    --success: #4ade80;
+    --success-soft: #163526;
+    --danger: #f87171;
+    --danger-soft: #3a1f1f;
+    color-scheme: dark;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
