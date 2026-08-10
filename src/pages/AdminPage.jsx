@@ -1,20 +1,25 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   loadQuestions,
   addQuestion,
   updateQuestion,
   deleteQuestion,
   getCategories,
+  IMPORTANCE_LEVELS,
 } from "../utils/storage.js";
+import { importanceClassName } from "../utils/importance.js";
 
 const emptyForm = {
   category: "",
   question: "",
   steps: [{ answers: [""] }],
+  importance: "中",
   explanation: "",
 };
 
 export default function AdminPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [questions, setQuestions] = useState([]);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
@@ -23,6 +28,15 @@ export default function AdminPage() {
   useEffect(() => {
     setQuestions(loadQuestions());
   }, []);
+
+  useEffect(() => {
+    const editId = searchParams.get("edit");
+    if (!editId) return;
+    const target = loadQuestions().find((q) => q.id === editId);
+    if (target) handleEdit(target);
+    setSearchParams({}, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const categories = useMemo(() => getCategories(), [questions]);
 
@@ -95,7 +109,7 @@ export default function AdminPage() {
       return;
     }
 
-    const payload = { category, question, steps, explanation };
+    const payload = { category, question, steps, importance: form.importance, explanation };
 
     if (editingId) {
       updateQuestion(editingId, payload);
@@ -114,6 +128,7 @@ export default function AdminPage() {
       category: q.category,
       question: q.question,
       steps: steps.map((s) => ({ answers: s.answers.length ? s.answers : [""] })),
+      importance: q.importance || "中",
       explanation: q.explanation || "",
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -162,6 +177,22 @@ export default function AdminPage() {
             value={form.question}
             onChange={(e) => setForm((f) => ({ ...f, question: e.target.value }))}
           />
+        </div>
+
+        <div className="field">
+          <label htmlFor="importance">重要度</label>
+          <select
+            id="importance"
+            value={form.importance}
+            onChange={(e) => setForm((f) => ({ ...f, importance: e.target.value }))}
+            style={{ maxWidth: 160 }}
+          >
+            {IMPORTANCE_LEVELS.map((level) => (
+              <option key={level} value={level}>
+                {level}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="field">
@@ -281,6 +312,7 @@ export default function AdminPage() {
           visibleQuestions.map((q) => (
             <div className="question-list-item" key={q.id}>
               <span className="tag">{q.category}</span>
+              <span className={`tag ${importanceClassName(q.importance)}`}>重要度: {q.importance}</span>
               {q.steps.length > 1 && <span className="tag tag-steps">{q.steps.length}ステップ</span>}
               <div style={{ marginTop: 8 }}>{q.question}</div>
               <div className="muted mono" style={{ marginTop: 4 }}>

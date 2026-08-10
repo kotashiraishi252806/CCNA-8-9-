@@ -172,6 +172,24 @@ label {
   margin-left: 6px;
 }
 
+.tag-importance-high {
+  background: var(--danger-soft);
+  color: var(--danger);
+  margin-left: 6px;
+}
+
+.tag-importance-mid {
+  background: var(--surface-hover);
+  color: var(--text-muted);
+  margin-left: 6px;
+}
+
+.tag-importance-low {
+  background: var(--success-soft);
+  color: var(--success);
+  margin-left: 6px;
+}
+
 .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
@@ -315,4 +333,28 @@ label {
 .history-question {
   flex: 1 1 200px;
   min-width: 0;
+}
+
+.session-group {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.session-group:last-child {
+  border-bottom: none;
+}
+
+.session-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.session-group .history-row {
+  padding-left: 4px;
 }

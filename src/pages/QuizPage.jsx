@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { loadQuestions, loadAttempts, recordAttempt, checkSteps, getCategories } from "../utils/storage.js";
 import { computeWrongQuestionIds } from "../utils/stats.js";
+import { importanceClassName } from "../utils/importance.js";
 
 function shuffle(array) {
   const copy = [...array];
@@ -17,11 +18,13 @@ export default function QuizPage() {
 
   const [selectedCategory, setSelectedCategory] = useState("すべて");
   const [sessionQuestions, setSessionQuestions] = useState(null);
+  const [quizSessionId, setQuizSessionId] = useState(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [userAnswer, setUserAnswer] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [lastResult, setLastResult] = useState(null);
   const [sessionCorrectCount, setSessionCorrectCount] = useState(0);
+  const [sessionMistakes, setSessionMistakes] = useState([]);
 
   function startQuiz() {
     let pool = allQuestions;
@@ -32,10 +35,12 @@ export default function QuizPage() {
       pool = allQuestions.filter((q) => q.category === selectedCategory);
     }
     setSessionQuestions(shuffle(pool));
+    setQuizSessionId(crypto.randomUUID());
     setCurrentIndex(0);
     setUserAnswer("");
     setSubmitted(false);
     setSessionCorrectCount(0);
+    setSessionMistakes([]);
   }
 
   function submitAnswer() {
@@ -44,12 +49,17 @@ export default function QuizPage() {
     const result = checkSteps(userAnswer, current.steps);
     setLastResult(result);
     setSubmitted(true);
-    if (result.correct) setSessionCorrectCount((c) => c + 1);
+    if (result.correct) {
+      setSessionCorrectCount((c) => c + 1);
+    } else {
+      setSessionMistakes((m) => [...m, current]);
+    }
     recordAttempt({
       questionId: current.id,
       category: current.category,
       correct: result.correct,
       userAnswer,
+      sessionId: quizSessionId,
     });
   }
 
@@ -157,6 +167,22 @@ export default function QuizPage() {
             </button>
           </div>
         </div>
+
+        {sessionMistakes.length > 0 && (
+          <div className="card" style={{ marginTop: 16 }}>
+            <h3>間違えた問題（{sessionMistakes.length}件）</h3>
+            {sessionMistakes.map((q, i) => (
+              <div className="question-list-item" key={`${q.id}-${i}`}>
+                <span className="tag">{q.category}</span>
+                <span className={`tag ${importanceClassName(q.importance)}`}>重要度: {q.importance}</span>
+                <div style={{ marginTop: 8 }}>{q.question}</div>
+                <div className="muted mono" style={{ marginTop: 4 }}>
+                  正解: {q.steps.map((s) => s.answers.join(" / ")).join(" → ")}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   }
@@ -179,7 +205,9 @@ export default function QuizPage() {
 
       <div className="card">
         <span className="tag">{current.category}</span>
-        {isMultiStep && <span className="tag tag-steps">{current.steps.length}ステップ</span>}
+        <span className={`tag ${importanceClassName(current.importance)}`}>
+          重要度: {current.importance}
+        </span>
         <h3 style={{ marginTop: 12 }}>{current.question}</h3>
 
         <form onSubmit={handleSubmitAnswer}>
@@ -198,11 +226,6 @@ export default function QuizPage() {
               onChange={(e) => setUserAnswer(e.target.value)}
               onKeyDown={handleTextareaKeyDown}
               disabled={submitted}
-              placeholder={
-                isMultiStep
-                  ? "例:\nconfigure terminal\ninterface gigabitEthernet 0/1\n..."
-                  : "コマンドや用語を入力してください"
-              }
             />
           </div>
           {!submitted && (

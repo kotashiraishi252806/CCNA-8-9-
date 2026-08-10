@@ -1,16 +1,22 @@
 const QUESTIONS_KEY = "ccna_questions";
 const ATTEMPTS_KEY = "ccna_attempts";
 
+export const IMPORTANCE_LEVELS = ["大", "中", "小"];
+const DEFAULT_IMPORTANCE = "中";
+
 // --- Questions ---
-// Question shape: { id, category, question, steps: { answers: string[] }[], explanation? }
+// Question shape: { id, category, question, steps: { answers: string[] }[], importance, explanation? }
 // steps is an ordered sequence of commands; most questions have a single step.
 // Older data may only have `answers: string[]` (a single command's alternates) —
 // normalizeQuestion() upgrades those on read.
 
 function normalizeQuestion(q) {
-  if (Array.isArray(q.steps) && q.steps.length > 0) return q;
-  const answers = Array.isArray(q.answers) ? q.answers : [];
-  return { ...q, steps: [{ answers }] };
+  const steps =
+    Array.isArray(q.steps) && q.steps.length > 0
+      ? q.steps
+      : [{ answers: Array.isArray(q.answers) ? q.answers : [] }];
+  const importance = IMPORTANCE_LEVELS.includes(q.importance) ? q.importance : DEFAULT_IMPORTANCE;
+  return { ...q, steps, importance };
 }
 
 export function loadQuestions() {

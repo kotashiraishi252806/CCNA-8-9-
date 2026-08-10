@@ -1,17 +1,14 @@
 import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { loadQuestions, loadAttempts, getCategories } from "../utils/storage.js";
-import { computeOverallStats } from "../utils/stats.js";
+import { loadQuestions, getCategories } from "../utils/storage.js";
 
 export default function HomePage() {
   const [questionCount, setQuestionCount] = useState(0);
   const [categoryCount, setCategoryCount] = useState(0);
-  const [overall, setOverall] = useState({ total: 0, correct: 0, accuracy: null });
 
   useEffect(() => {
     setQuestionCount(loadQuestions().length);
     setCategoryCount(getCategories().length);
-    setOverall(computeOverallStats(loadAttempts()));
   }, []);
 
   return (
@@ -29,10 +26,6 @@ export default function HomePage() {
         <div className="stat-tile">
           <div className="value">{categoryCount}</div>
           <div className="label">カテゴリ数</div>
-        </div>
-        <div className="stat-tile">
-          <div className="value">{overall.accuracy !== null ? `${overall.accuracy}%` : "-"}</div>
-          <div className="label">全体正答率（{overall.total}問中）</div>
         </div>
       </div>
 

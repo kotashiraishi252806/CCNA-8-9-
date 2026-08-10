@@ -1,20 +1,3 @@
-export function computeCategoryStats(attempts, categories) {
-  const byCategory = Object.fromEntries(
-    categories.map((c) => [c, { total: 0, correct: 0 }])
-  );
-  for (const a of attempts) {
-    if (!byCategory[a.category]) byCategory[a.category] = { total: 0, correct: 0 };
-    byCategory[a.category].total += 1;
-    if (a.correct) byCategory[a.category].correct += 1;
-  }
-  return Object.entries(byCategory).map(([category, { total, correct }]) => ({
-    category,
-    total,
-    correct,
-    accuracy: total > 0 ? Math.round((correct / total) * 100) : null,
-  }));
-}
-
 export function computeOverallStats(attempts) {
   const total = attempts.length;
   const correct = attempts.filter((a) => a.correct).length;
