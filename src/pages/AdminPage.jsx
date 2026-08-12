@@ -7,8 +7,10 @@ import {
   deleteQuestion,
   getCategories,
   IMPORTANCE_LEVELS,
+  checkSteps,
 } from "../utils/storage.js";
 import { importanceClassName } from "../utils/importance.js";
+import QuestionText from "../components/QuestionText.jsx";
 
 const emptyForm = {
   category: "",
@@ -24,6 +26,9 @@ export default function AdminPage() {
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
   const [filterCategory, setFilterCategory] = useState("すべて");
+  const [practiceId, setPracticeId] = useState(null);
+  const [practiceAnswer, setPracticeAnswer] = useState("");
+  const [practiceResult, setPracticeResult] = useState(null);
 
   useEffect(() => {
     setQuestions(loadQuestions());
@@ -122,6 +127,9 @@ export default function AdminPage() {
   }
 
   function handleEdit(q) {
+    // Keep the in-progress practice answer if we're editing the same question
+    // the user was answering; only clear it when switching to a different one.
+    if (practiceId !== q.id) closePractice();
     setEditingId(q.id);
     const steps = q.steps && q.steps.length ? q.steps : [{ answers: [""] }];
     setForm({
@@ -139,6 +147,29 @@ export default function AdminPage() {
     deleteQuestion(id);
     setQuestions(loadQuestions());
     if (editingId === id) resetForm();
+    if (practiceId === id) closePractice();
+  }
+
+  function openPractice(q) {
+    setPracticeId(q.id);
+    setPracticeAnswer("");
+    setPracticeResult(null);
+  }
+
+  function closePractice() {
+    setPracticeId(null);
+    setPracticeAnswer("");
+    setPracticeResult(null);
+  }
+
+  function submitPractice(q) {
+    if (!practiceAnswer.trim()) return;
+    setPracticeResult(checkSteps(practiceAnswer, q.steps));
+  }
+
+  function retryPractice() {
+    setPracticeAnswer("");
+    setPracticeResult(null);
   }
 
   return (
@@ -169,11 +200,16 @@ export default function AdminPage() {
         </div>
 
         <div className="field">
-          <label htmlFor="question">問題文</label>
+          <label htmlFor="question">
+            問題文（行頭 <code>#</code> で見出し、<code>##</code> で要件・条件の見出し、
+            <code>・</code> や <code>- </code> で箇条書きになります）
+          </label>
           <textarea
             id="question"
-            rows={3}
-            placeholder="例: G0/1にIPアドレス192.168.1.1/24を設定し、有効化するコマンドを順に入力せよ"
+            rows={6}
+            placeholder={
+              "例:\n# 拡張名前付きACL(EXTEST)の作成および適用\n## 要件\n・PC01(192.168.0.11)からWebサーバ(172.16.0.11)へのポート80を拒否する\n・それ以外の送信元から全ての宛先へのアクセスを許可する"
+            }
             value={form.question}
             onChange={(e) => setForm((f) => ({ ...f, question: e.target.value }))}
           />
@@ -314,23 +350,89 @@ export default function AdminPage() {
               <span className="tag">{q.category}</span>
               <span className={`tag ${importanceClassName(q.importance)}`}>重要度: {q.importance}</span>
               {q.steps.length > 1 && <span className="tag tag-steps">{q.steps.length}ステップ</span>}
-              <div style={{ marginTop: 8 }}>{q.question}</div>
-              <div className="muted mono" style={{ marginTop: 4 }}>
-                正解: {q.steps.map((s) => s.answers.join(" / ")).join(" → ")}
-              </div>
-              {q.explanation && (
+              <QuestionText text={q.question} className="question-preview" />
+              {(practiceId !== q.id || practiceResult) && (
+                <div className="muted mono" style={{ marginTop: 4 }}>
+                  正解: {q.steps.map((s) => s.answers.join(" / ")).join(" → ")}
+                </div>
+              )}
+              {q.explanation && (practiceId !== q.id || practiceResult) && (
                 <div className="muted" style={{ marginTop: 4 }}>
                   解説: {q.explanation}
                 </div>
               )}
-              <div className="question-actions">
-                <button className="btn" onClick={() => handleEdit(q)}>
+              <div className="tab-bar">
+                <button
+                  type="button"
+                  className={`tab-btn ${practiceId === q.id ? "active" : ""}`}
+                  onClick={() => (practiceId === q.id ? closePractice() : openPractice(q))}
+                >
+                  回答
+                </button>
+                <button
+                  type="button"
+                  className={`tab-btn ${editingId === q.id ? "active" : ""}`}
+                  onClick={() => handleEdit(q)}
+                >
                   編集
                 </button>
-                <button className="btn btn-danger" onClick={() => handleDelete(q.id)}>
+                <button
+                  type="button"
+                  className="tab-btn tab-btn-danger"
+                  onClick={() => handleDelete(q.id)}
+                >
                   削除
                 </button>
               </div>
+
+              {practiceId === q.id && (
+                <div className="practice-panel">
+                  <div className="field">
+                    <label htmlFor={`practice-${q.id}`}>
+                      {q.steps.length > 1 ? "回答を入力（1行に1コマンドずつ）" : "回答を入力"}
+                    </label>
+                    <textarea
+                      id={`practice-${q.id}`}
+                      className="mono"
+                      rows={q.steps.length > 1 ? Math.min(q.steps.length, 6) : 1}
+                      autoFocus
+                      value={practiceAnswer}
+                      onChange={(e) => setPracticeAnswer(e.target.value)}
+                      disabled={!!practiceResult}
+                    />
+                  </div>
+                  {!practiceResult ? (
+                    <button type="button" className="btn btn-primary" onClick={() => submitPractice(q)}>
+                      確認する
+                    </button>
+                  ) : (
+                    <>
+                      <div className={`feedback ${practiceResult.correct ? "correct" : "wrong"}`}>
+                        {practiceResult.correct ? "正解です！" : "不正解です。"}
+                      </div>
+                      <div className="step-feedback">
+                        {practiceResult.stepResults.map((r) => (
+                          <div className="step-feedback-row" key={r.index}>
+                            <span className={`history-mark ${r.correct ? "correct" : "wrong"}`}>
+                              {r.correct ? "⚪︎" : "×"}
+                            </span>
+                            <span className="step-feedback-text">{r.userLine || "(未入力)"}</span>
+                            <span className="muted">→ 正解: {r.expected.join(" / ")}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="question-actions">
+                        <button type="button" className="btn" onClick={retryPractice}>
+                          もう一度
+                        </button>
+                      </div>
+                    </>
+                  )}
+                  <div className="muted" style={{ marginTop: 8 }}>
+                    ※ この回答は記録されません（一時的な確認用です）
+                  </div>
+                </div>
+              )}
             </div>
           ))
         )}

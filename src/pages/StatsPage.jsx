@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { loadQuestions, loadAttempts, clearAttempts } from "../utils/storage.js";
-import { computeOverallStats, computeWrongQuestionIds } from "../utils/stats.js";
+import { computeOverallStats, computeWrongQuestionIds, computeQuestionHistory } from "../utils/stats.js";
 import { importanceClassName } from "../utils/importance.js";
+import { toPlainSummary } from "../utils/questionText.js";
+import QuestionText from "../components/QuestionText.jsx";
 
 const HISTORY_PAGE_SIZE = 10;
 
@@ -51,6 +53,7 @@ export default function StatsPage() {
   const navigate = useNavigate();
   const [attempts, setAttempts] = useState(() => loadAttempts());
   const [historyLimit, setHistoryLimit] = useState(HISTORY_PAGE_SIZE);
+  const [questionHistoryLimit, setQuestionHistoryLimit] = useState(HISTORY_PAGE_SIZE);
   const questions = useMemo(() => loadQuestions(), []);
   const questionById = useMemo(
     () => new Map(questions.map((q) => [q.id, q])),
@@ -60,17 +63,30 @@ export default function StatsPage() {
   const overall = useMemo(() => computeOverallStats(attempts), [attempts]);
 
   const wrongQuestions = useMemo(() => {
-    const wrongIds = new Set(computeWrongQuestionIds(attempts));
-    return questions.filter((q) => wrongIds.has(q.id));
-  }, [attempts, questions]);
+    const wrongIds = computeWrongQuestionIds(attempts);
+    return wrongIds.map((id) => questionById.get(id)).filter(Boolean);
+  }, [attempts, questionById]);
 
   const sessionGroups = useMemo(() => groupBySession(attempts), [attempts]);
+
+  const questionHistories = useMemo(() => {
+    const historyByQuestion = computeQuestionHistory(attempts);
+    return [...historyByQuestion.entries()]
+      .map(([questionId, history]) => ({ questionId, question: questionById.get(questionId), history }))
+      .filter((h) => h.question)
+      .sort(
+        (a, b) =>
+          new Date(b.history[b.history.length - 1].answeredAt) -
+          new Date(a.history[a.history.length - 1].answeredAt)
+      );
+  }, [attempts, questionById]);
 
   function handleReset() {
     if (!confirm("学習履歴（正答率・間違えた問題）をすべてリセットしますか？")) return;
     clearAttempts();
     setAttempts([]);
     setHistoryLimit(HISTORY_PAGE_SIZE);
+    setQuestionHistoryLimit(HISTORY_PAGE_SIZE);
   }
 
   return (
@@ -100,7 +116,7 @@ export default function StatsPage() {
               <span className="tag">{q.category}</span>
               <span className={`tag ${importanceClassName(q.importance)}`}>重要度: {q.importance}</span>
               {q.steps.length > 1 && <span className="tag tag-steps">{q.steps.length}ステップ</span>}
-              <div style={{ marginTop: 8 }}>{q.question}</div>
+              <QuestionText text={q.question} className="question-preview" />
               <div className="muted mono" style={{ marginTop: 4 }}>
                 正解: {q.steps.map((s) => s.answers.join(" / ")).join(" → ")}
               </div>
@@ -139,7 +155,9 @@ export default function StatsPage() {
                         {a.correct ? "⚪︎" : "×"}
                       </span>
                       {q && <span className="tag">{q.category}</span>}
-                      <span className="history-question">{q ? q.question : "（削除済みの問題）"}</span>
+                      <span className="history-question">
+                        {q ? toPlainSummary(q.question) : "（削除済みの問題）"}
+                      </span>
                     </div>
                   );
                 })}
@@ -150,6 +168,36 @@ export default function StatsPage() {
                 className="btn"
                 style={{ marginTop: 12 }}
                 onClick={() => setHistoryLimit((n) => n + HISTORY_PAGE_SIZE)}
+              >
+                もっと見る
+              </button>
+            )}
+          </>
+        )}
+      </div>
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <h3>問題ごとの学習履歴（{questionHistories.length}件）</h3>
+        {questionHistories.length === 0 ? (
+          <div className="empty-state">まだ回答履歴がありません。</div>
+        ) : (
+          <>
+            {questionHistories.slice(0, questionHistoryLimit).map(({ questionId, question, history }) => (
+              <div className="question-list-item" key={questionId}>
+                <span className="tag">{question.category}</span>
+                <QuestionText text={question.question} className="question-preview" />
+                <div className="muted mono" style={{ marginTop: 4 }}>
+                  {history
+                    .map((a) => `${formatDateTime(a.answeredAt)}：${a.correct ? "⚪︎" : "×"}`)
+                    .join(" → ")}
+                </div>
+              </div>
+            ))}
+            {questionHistoryLimit < questionHistories.length && (
+              <button
+                className="btn"
+                style={{ marginTop: 12 }}
+                onClick={() => setQuestionHistoryLimit((n) => n + HISTORY_PAGE_SIZE)}
               >
                 もっと見る
               </button>

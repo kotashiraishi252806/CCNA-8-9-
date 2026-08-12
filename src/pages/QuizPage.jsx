@@ -1,7 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { loadQuestions, loadAttempts, recordAttempt, checkSteps, getCategories } from "../utils/storage.js";
-import { computeWrongQuestionIds } from "../utils/stats.js";
+import {
+  computeLastSessionWrongQuestionIds,
+  computeLowAccuracyQuestionIds,
+} from "../utils/stats.js";
 import { importanceClassName } from "../utils/importance.js";
+import QuestionText from "../components/QuestionText.jsx";
 
 function shuffle(array) {
   const copy = [...array];
@@ -13,12 +17,43 @@ function shuffle(array) {
 }
 
 export default function QuizPage() {
-  const allQuestions = useMemo(() => loadQuestions(), []);
-  const categories = useMemo(() => getCategories(), []);
+  const [allQuestions, setAllQuestions] = useState(() => loadQuestions());
+  const [categories, setCategories] = useState(() => getCategories());
 
-  const [selectedCategory, setSelectedCategory] = useState("すべて");
+  useEffect(() => {
+    // Picks up edits made in another tab (e.g. via "この問題を編集") once you
+    // switch back to this tab. The session already in progress is left alone;
+    // this only affects the next "出題を開始".
+    function refreshQuestions() {
+      setAllQuestions(loadQuestions());
+      setCategories(getCategories());
+    }
+    window.addEventListener("focus", refreshQuestions);
+    return () => window.removeEventListener("focus", refreshQuestions);
+  }, []);
+
+  const [selectAllCategories, setSelectAllCategories] = useState(true);
+  const [selectedCategories, setSelectedCategories] = useState(() => new Set());
+  const [wrongOnly, setWrongOnly] = useState(false);
+  const [lowAccuracyOnly, setLowAccuracyOnly] = useState(false);
+  const [lowAccuracyThreshold, setLowAccuracyThreshold] = useState(50);
+  const [randomLimitOnly, setRandomLimitOnly] = useState(false);
+  const [randomLimitCount, setRandomLimitCount] = useState(10);
   const [sessionQuestions, setSessionQuestions] = useState(null);
   const [quizSessionId, setQuizSessionId] = useState(null);
+  // Bumped whenever we return to the setup screen, so wrongIds/lowAccuracyIds pick up
+  // attempts recorded in the session that just ended even if the filters didn't change.
+  const [statsRefreshKey, setStatsRefreshKey] = useState(0);
+  const wrongIds = useMemo(
+    () => new Set(computeLastSessionWrongQuestionIds(loadAttempts())),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [statsRefreshKey]
+  );
+  const lowAccuracyIds = useMemo(
+    () => new Set(computeLowAccuracyQuestionIds(loadAttempts(), lowAccuracyThreshold)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [lowAccuracyThreshold, statsRefreshKey]
+  );
   const [currentIndex, setCurrentIndex] = useState(0);
   const [userAnswer, setUserAnswer] = useState("");
   const [submitted, setSubmitted] = useState(false);
@@ -26,15 +61,50 @@ export default function QuizPage() {
   const [sessionCorrectCount, setSessionCorrectCount] = useState(0);
   const [sessionMistakes, setSessionMistakes] = useState([]);
 
-  function startQuiz() {
-    let pool = allQuestions;
-    if (selectedCategory === "苦手問題のみ") {
-      const wrongIds = new Set(computeWrongQuestionIds(loadAttempts()));
-      pool = allQuestions.filter((q) => wrongIds.has(q.id));
-    } else if (selectedCategory !== "すべて") {
-      pool = allQuestions.filter((q) => q.category === selectedCategory);
+  // "すべて" and no-category-selected behave the same way, so unchecking "すべて"
+  // to make room for "苦手問題のみ" doesn't silently narrow the pool to nothing.
+  const categoryFilteredQuestions =
+    selectAllCategories || selectedCategories.size === 0
+      ? allQuestions
+      : allQuestions.filter((q) => selectedCategories.has(q.category));
+
+  function toggleSelectAllCategories(checked) {
+    setSelectAllCategories(checked);
+    if (checked) {
+      setSelectedCategories(new Set());
+      setWrongOnly(false);
     }
-    setSessionQuestions(shuffle(pool));
+  }
+
+  function toggleCategory(category) {
+    setSelectedCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(category)) next.delete(category);
+      else next.add(category);
+      return next;
+    });
+    setSelectAllCategories(false);
+  }
+
+  function toggleWrongOnly(checked) {
+    setWrongOnly(checked);
+    if (checked) setSelectAllCategories(false);
+  }
+
+  function startQuiz() {
+    let pool = categoryFilteredQuestions;
+    if (wrongOnly) {
+      pool = pool.filter((q) => wrongIds.has(q.id));
+    }
+    if (lowAccuracyOnly) {
+      const lowIds = new Set(computeLowAccuracyQuestionIds(loadAttempts(), lowAccuracyThreshold));
+      pool = pool.filter((q) => lowIds.has(q.id));
+    }
+    let finalQuestions = shuffle(pool);
+    if (randomLimitOnly) {
+      finalQuestions = finalQuestions.slice(0, randomLimitCount);
+    }
+    setSessionQuestions(finalQuestions);
     setQuizSessionId(crypto.randomUUID());
     setCurrentIndex(0);
     setUserAnswer("");
@@ -84,6 +154,7 @@ export default function QuizPage() {
 
   function handleRestart() {
     setSessionQuestions(null);
+    setStatsRefreshKey((k) => k + 1);
   }
 
   if (allQuestions.length === 0) {
@@ -103,20 +174,81 @@ export default function QuizPage() {
         <h1>出題</h1>
         <div className="card">
           <div className="field">
-            <label htmlFor="category-select">カテゴリを選択</label>
-            <select
-              id="category-select"
-              value={selectedCategory}
-              onChange={(e) => setSelectedCategory(e.target.value)}
-            >
-              <option value="すべて">すべて（{allQuestions.length}問）</option>
+            <label>カテゴリを選択</label>
+            <div className="checkbox-group">
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={selectAllCategories}
+                  onChange={(e) => toggleSelectAllCategories(e.target.checked)}
+                />
+                すべて（{allQuestions.length}問）
+              </label>
               {categories.map((c) => (
-                <option key={c} value={c}>
+                <label className="checkbox-label" key={c}>
+                  <input
+                    type="checkbox"
+                    checked={selectedCategories.has(c)}
+                    onChange={() => toggleCategory(c)}
+                  />
                   {c}（{allQuestions.filter((q) => q.category === c).length}問）
-                </option>
+                </label>
               ))}
-              <option value="苦手問題のみ">苦手問題のみ（前回間違えた問題）</option>
-            </select>
+            </div>
+          </div>
+          <div className="field">
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={wrongOnly}
+                onChange={(e) => toggleWrongOnly(e.target.checked)}
+              />
+              苦手問題のみ（前回間違えた問題、
+              {categoryFilteredQuestions.filter((q) => wrongIds.has(q.id)).length}
+              問）
+            </label>
+          </div>
+          <div className="field">
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={lowAccuracyOnly}
+                onChange={(e) => setLowAccuracyOnly(e.target.checked)}
+              />
+              正解率が低い問題のみ（
+              <input
+                type="number"
+                min={1}
+                max={99}
+                value={lowAccuracyThreshold}
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => setLowAccuracyThreshold(Number(e.target.value))}
+                className="threshold-input"
+              />
+              %未満、
+              {categoryFilteredQuestions.filter((q) => lowAccuracyIds.has(q.id)).length}
+              問）
+            </label>
+          </div>
+          <div className="field">
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={randomLimitOnly}
+                onChange={(e) => setRandomLimitOnly(e.target.checked)}
+              />
+              ランダム
+              <input
+                type="number"
+                min={1}
+                max={999}
+                value={randomLimitCount}
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => setRandomLimitCount(Number(e.target.value))}
+                className="threshold-input"
+              />
+              問だけ出題
+            </label>
           </div>
           <button className="btn btn-primary" onClick={startQuiz}>
             出題を開始
@@ -175,7 +307,7 @@ export default function QuizPage() {
               <div className="question-list-item" key={`${q.id}-${i}`}>
                 <span className="tag">{q.category}</span>
                 <span className={`tag ${importanceClassName(q.importance)}`}>重要度: {q.importance}</span>
-                <div style={{ marginTop: 8 }}>{q.question}</div>
+                <QuestionText text={q.question} className="question-preview" />
                 <div className="muted mono" style={{ marginTop: 4 }}>
                   正解: {q.steps.map((s) => s.answers.join(" / ")).join(" → ")}
                 </div>
@@ -208,7 +340,7 @@ export default function QuizPage() {
         <span className={`tag ${importanceClassName(current.importance)}`}>
           重要度: {current.importance}
         </span>
-        <h3 style={{ marginTop: 12 }}>{current.question}</h3>
+        <QuestionText text={current.question} className="quiz-question" />
 
         <form onSubmit={handleSubmitAnswer}>
           <div className="field">
@@ -267,6 +399,12 @@ export default function QuizPage() {
             <div className="question-actions">
               <button className="btn btn-primary" onClick={handleNext}>
                 {currentIndex + 1 === sessionQuestions.length ? "結果を見る" : "次の問題へ"}
+              </button>
+              <button
+                className="btn"
+                onClick={() => window.open(`/admin?edit=${current.id}`, "_blank", "noopener")}
+              >
+                この問題を編集（別タブで開く）
               </button>
             </div>
           </>
