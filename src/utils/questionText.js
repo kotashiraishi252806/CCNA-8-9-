@@ -1,6 +1,6 @@
 // Lightweight markdown-like parsing for question text.
 // Supported syntax: "# " = heading, "## " = sub-heading (requirements/conditions),
-// "・" or "- " = list item. Everything else is plain paragraph text.
+// "### " = sub-sub-heading, "・" or "- " = list item. Everything else is plain paragraph text.
 
 export function parseQuestionText(text) {
   const lines = String(text ?? "").split("\n");
@@ -24,11 +24,16 @@ export function parseQuestionText(text) {
 
   for (const rawLine of lines) {
     const line = rawLine.trimEnd();
-    const h2Match = line.match(/^##\s+(.*)/);
-    const h1Match = !h2Match && line.match(/^#\s+(.*)/);
+    const h3Match = line.match(/^###\s+(.*)/);
+    const h2Match = !h3Match && line.match(/^##\s+(.*)/);
+    const h1Match = !h3Match && !h2Match && line.match(/^#\s+(.*)/);
     const listMatch = line.match(/^(?:・|-\s+)(.*)/);
 
-    if (h2Match) {
+    if (h3Match) {
+      flushList();
+      flushParagraph();
+      blocks.push({ type: "h3", text: h3Match[1] });
+    } else if (h2Match) {
       flushList();
       flushParagraph();
       blocks.push({ type: "h2", text: h2Match[1] });
@@ -58,7 +63,7 @@ export function parseQuestionText(text) {
 export function toPlainSummary(text) {
   return String(text ?? "")
     .split("\n")
-    .map((l) => l.replace(/^#{1,2}\s+/, "").replace(/^(?:・|-\s+)/, "").trim())
+    .map((l) => l.replace(/^#{1,3}\s+/, "").replace(/^(?:・|-\s+)/, "").trim())
     .filter(Boolean)
     .join(" ");
 }

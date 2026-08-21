@@ -202,6 +202,7 @@ export default function AdminPage() {
         <div className="field">
           <label htmlFor="question">
             問題文（行頭 <code>#</code> で見出し、<code>##</code> で要件・条件の見出し、
+            <code>###</code> でさらに下の階層の見出し、
             <code>・</code> や <code>- </code> で箇条書きになります）
           </label>
           <textarea

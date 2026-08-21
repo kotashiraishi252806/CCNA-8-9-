@@ -389,6 +389,14 @@ label {
   margin-bottom: 6px;
 }
 
+.question-h3 {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-muted);
+  margin-top: 10px;
+  margin-bottom: 4px;
+}
+
 .question-p {
   margin: 8px 0;
   line-height: 1.6;

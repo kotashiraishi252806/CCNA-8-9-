@@ -19,6 +19,13 @@ export default function QuestionText({ text, className = "" }) {
             </h4>
           );
         }
+        if (block.type === "h3") {
+          return (
+            <h5 className="question-h3" key={i}>
+              {block.text}
+            </h5>
+          );
+        }
         if (block.type === "list") {
           return (
             <ul className="question-list" key={i}>

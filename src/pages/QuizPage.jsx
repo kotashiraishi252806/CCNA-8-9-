@@ -336,7 +336,6 @@ export default function QuizPage() {
       </div>
 
       <div className="card">
-        <span className="tag">{current.category}</span>
         <span className={`tag ${importanceClassName(current.importance)}`}>
           重要度: {current.importance}
         </span>
