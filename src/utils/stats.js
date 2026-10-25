@@ -80,3 +80,76 @@ export function computeQuestionHistory(attempts) {
   }
   return byQuestion;
 }
+
+// --- Learning record (daily volume, per-session accuracy trend) ---
+
+// One row per quiz session ("set" — a full category, wrong-only, or any other
+// filtered run), oldest to newest.
+export function computeSessionSummaries(attempts) {
+  const bySession = new Map();
+  for (const a of attempts) {
+    const key = sessionKeyOf(a);
+    if (!bySession.has(key)) bySession.set(key, []);
+    bySession.get(key).push(a);
+  }
+  return [...bySession.values()]
+    .map((group) => {
+      const sorted = [...group].sort((a, b) => new Date(a.answeredAt) - new Date(b.answeredAt));
+      const correct = sorted.filter((a) => a.correct).length;
+      const total = sorted.length;
+      return {
+        key: sorted[0].id,
+        start: sorted[0].answeredAt,
+        end: sorted[sorted.length - 1].answeredAt,
+        correct,
+        total,
+        accuracy: Math.round((correct / total) * 100),
+      };
+    })
+    .sort((a, b) => new Date(a.start) - new Date(b.start));
+}
+
+function localDateKey(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+// Local calendar dates from `days` ago through today, ascending, as "YYYY-MM-DD".
+// Local (not UTC) so a late-night session lands on the day the user experienced it.
+export function recentDateKeys(days) {
+  const keys = [];
+  const today = new Date();
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    keys.push(localDateKey(d));
+  }
+  return keys;
+}
+
+// Local calendar dates from `fromDateKey` ("YYYY-MM-DD") through today, ascending.
+export function dateKeysSince(fromDateKey) {
+  const [y, m, d] = fromDateKey.split("-").map(Number);
+  const cur = new Date(y, m - 1, d);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const keys = [];
+  while (cur <= today) {
+    keys.push(localDateKey(cur));
+    cur.setDate(cur.getDate() + 1);
+  }
+  return keys;
+}
+
+// Number of questions solved per calendar day, oldest to newest.
+export function computeDailyStudyCounts(attempts) {
+  const byDate = new Map();
+  for (const a of attempts) {
+    const date = localDateKey(new Date(a.answeredAt));
+    if (!byDate.has(date)) byDate.set(date, { date, count: 0 });
+    byDate.get(date).count += 1;
+  }
+  return [...byDate.values()].sort((a, b) => (a.date < b.date ? -1 : 1));
+}

@@ -8,14 +8,19 @@ import {
   getCategories,
   IMPORTANCE_LEVELS,
   checkSteps,
+  checkTable,
+  emptyTableCell,
 } from "../utils/storage.js";
 import { importanceClassName } from "../utils/importance.js";
 import QuestionText from "../components/QuestionText.jsx";
+import QuestionTable from "../components/QuestionTable.jsx";
 
 const emptyForm = {
   category: "",
   question: "",
+  type: "command",
   steps: [{ answers: [""] }],
+  table: { cells: [[emptyTableCell(), emptyTableCell()], [emptyTableCell(), emptyTableCell()]] },
   importance: "中",
   explanation: "",
 };
@@ -28,6 +33,7 @@ export default function AdminPage() {
   const [filterCategory, setFilterCategory] = useState("すべて");
   const [practiceId, setPracticeId] = useState(null);
   const [practiceAnswer, setPracticeAnswer] = useState("");
+  const [practiceTableValues, setPracticeTableValues] = useState({});
   const [practiceResult, setPracticeResult] = useState(null);
 
   useEffect(() => {
@@ -95,6 +101,55 @@ export default function AdminPage() {
     });
   }
 
+  function updateCell(rowIndex, colIndex, updates) {
+    setForm((f) => ({
+      ...f,
+      table: {
+        ...f.table,
+        cells: f.table.cells.map((row, ri) =>
+          ri !== rowIndex
+            ? row
+            : row.map((cell, ci) => (ci !== colIndex ? cell : { ...cell, ...updates }))
+        ),
+      },
+    }));
+  }
+
+  function addTableRow() {
+    setForm((f) => {
+      const cols = f.table.cells[0]?.length || 1;
+      const newRow = Array.from({ length: cols }, () => emptyTableCell());
+      return { ...f, table: { ...f.table, cells: [...f.table.cells, newRow] } };
+    });
+  }
+
+  function removeTableRow(rowIndex) {
+    setForm((f) => {
+      if (f.table.cells.length <= 1) return f;
+      return { ...f, table: { ...f.table, cells: f.table.cells.filter((_, ri) => ri !== rowIndex) } };
+    });
+  }
+
+  function addTableColumn() {
+    setForm((f) => ({
+      ...f,
+      table: { ...f.table, cells: f.table.cells.map((row) => [...row, emptyTableCell()]) },
+    }));
+  }
+
+  function removeTableColumn(colIndex) {
+    setForm((f) => {
+      if ((f.table.cells[0]?.length || 0) <= 1) return f;
+      return {
+        ...f,
+        table: {
+          ...f.table,
+          cells: f.table.cells.map((row) => row.filter((_, ci) => ci !== colIndex)),
+        },
+      };
+    });
+  }
+
   function resetForm() {
     setForm(emptyForm);
     setEditingId(null);
@@ -105,16 +160,41 @@ export default function AdminPage() {
     const category = form.category.trim();
     const question = form.question.trim();
     const explanation = form.explanation.trim();
-    const steps = form.steps
-      .map((s) => ({ answers: s.answers.map((a) => a.trim()).filter(Boolean) }))
-      .filter((s) => s.answers.length > 0);
 
-    if (!category || !question || steps.length === 0) {
-      alert("カテゴリ、問題文、各ステップの正解を少なくとも1つ入力してください。");
+    if (!category || !question) {
+      alert("カテゴリと問題文を入力してください。");
       return;
     }
 
-    const payload = { category, question, steps, importance: form.importance, explanation };
+    let payload;
+    if (form.type === "table") {
+      const cells = form.table.cells.map((row) =>
+        row.map((cell) =>
+          cell.blank
+            ? { blank: true, text: "", answer: cell.answer.trim() }
+            : { blank: false, text: cell.text.trim(), answer: "" }
+        )
+      );
+      const blankCells = cells.flat().filter((c) => c.blank);
+      if (blankCells.length === 0) {
+        alert("空欄セルを少なくとも1つ作り、正解を入力してください。");
+        return;
+      }
+      if (blankCells.some((c) => !c.answer)) {
+        alert("空欄セルにはすべて正解を入力してください。");
+        return;
+      }
+      payload = { category, question, type: "table", table: { cells }, importance: form.importance, explanation };
+    } else {
+      const steps = form.steps
+        .map((s) => ({ answers: s.answers.map((a) => a.trim()).filter(Boolean) }))
+        .filter((s) => s.answers.length > 0);
+      if (steps.length === 0) {
+        alert("各ステップの正解を少なくとも1つ入力してください。");
+        return;
+      }
+      payload = { category, question, type: "command", steps, importance: form.importance, explanation };
+    }
 
     if (editingId) {
       updateQuestion(editingId, payload);
@@ -135,7 +215,9 @@ export default function AdminPage() {
     setForm({
       category: q.category,
       question: q.question,
+      type: q.type === "table" ? "table" : "command",
       steps: steps.map((s) => ({ answers: s.answers.length ? s.answers : [""] })),
+      table: q.table && q.table.cells.length ? q.table : emptyForm.table,
       importance: q.importance || "中",
       explanation: q.explanation || "",
     });
@@ -153,22 +235,29 @@ export default function AdminPage() {
   function openPractice(q) {
     setPracticeId(q.id);
     setPracticeAnswer("");
+    setPracticeTableValues({});
     setPracticeResult(null);
   }
 
   function closePractice() {
     setPracticeId(null);
     setPracticeAnswer("");
+    setPracticeTableValues({});
     setPracticeResult(null);
   }
 
   function submitPractice(q) {
+    if (q.type === "table") {
+      setPracticeResult(checkTable(practiceTableValues, q.table));
+      return;
+    }
     if (!practiceAnswer.trim()) return;
     setPracticeResult(checkSteps(practiceAnswer, q.steps));
   }
 
   function retryPractice() {
     setPracticeAnswer("");
+    setPracticeTableValues({});
     setPracticeResult(null);
   }
 
@@ -217,6 +306,30 @@ export default function AdminPage() {
         </div>
 
         <div className="field">
+          <label>問題形式</label>
+          <div className="row">
+            <label className="checkbox-label">
+              <input
+                type="radio"
+                name="question-type"
+                checked={form.type === "command"}
+                onChange={() => setForm((f) => ({ ...f, type: "command" }))}
+              />
+              コマンド入力
+            </label>
+            <label className="checkbox-label">
+              <input
+                type="radio"
+                name="question-type"
+                checked={form.type === "table"}
+                onChange={() => setForm((f) => ({ ...f, type: "table" }))}
+              />
+              表の穴埋め
+            </label>
+          </div>
+        </div>
+
+        <div className="field">
           <label htmlFor="importance">重要度</label>
           <select
             id="importance"
@@ -232,6 +345,7 @@ export default function AdminPage() {
           </select>
         </div>
 
+        {form.type === "command" && (
         <div className="field">
           <label>
             正解コマンド（1ステップ=1コマンド。複数コマンドが必要な問題は「ステップを追加」で順番に登録）
@@ -302,6 +416,81 @@ export default function AdminPage() {
             + ステップを追加（複数コマンドの問題にする）
           </button>
         </div>
+        )}
+
+        {form.type === "table" && (
+        <div className="field">
+          <label>
+            表（各セルの「空欄」にチェックを入れると、そのセルがユーザ入力の正解セルになります）
+          </label>
+          <div className="question-actions" style={{ marginTop: 0, marginBottom: 10 }}>
+            <button type="button" className="btn" onClick={addTableRow}>
+              + 行を追加
+            </button>
+            <button type="button" className="btn" onClick={addTableColumn}>
+              + 列を追加
+            </button>
+          </div>
+          <div className="table-editor" style={{ overflowX: "auto" }}>
+            <table className="table-editor-grid">
+              <tbody>
+                {form.table.cells.map((row, ri) => (
+                  <tr key={ri}>
+                    {row.map((cell, ci) => (
+                      <td className="table-editor-cell" key={ci}>
+                        <label className="checkbox-label" style={{ fontSize: 12, marginBottom: 6 }}>
+                          <input
+                            type="checkbox"
+                            checked={cell.blank}
+                            onChange={(e) => updateCell(ri, ci, { blank: e.target.checked })}
+                          />
+                          空欄
+                        </label>
+                        {cell.blank ? (
+                          <input
+                            type="text"
+                            className="mono"
+                            placeholder="正解"
+                            value={cell.answer}
+                            onChange={(e) => updateCell(ri, ci, { answer: e.target.value })}
+                          />
+                        ) : (
+                          <input
+                            type="text"
+                            placeholder="表示内容"
+                            value={cell.text}
+                            onChange={(e) => updateCell(ri, ci, { text: e.target.value })}
+                          />
+                        )}
+                        <button
+                          type="button"
+                          className="btn btn-danger"
+                          style={{ marginTop: 6, fontSize: 12, padding: "4px 8px" }}
+                          onClick={() => removeTableColumn(ci)}
+                          disabled={row.length === 1}
+                        >
+                          列削除
+                        </button>
+                      </td>
+                    ))}
+                    <td>
+                      <button
+                        type="button"
+                        className="btn btn-danger"
+                        style={{ fontSize: 12, padding: "4px 8px" }}
+                        onClick={() => removeTableRow(ri)}
+                        disabled={form.table.cells.length === 1}
+                      >
+                        行削除
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        )}
 
         <div className="field">
           <label htmlFor="explanation">解説（任意）</label>
@@ -350,12 +539,22 @@ export default function AdminPage() {
             <div className="question-list-item" key={q.id}>
               <span className="tag">{q.category}</span>
               <span className={`tag ${importanceClassName(q.importance)}`}>重要度: {q.importance}</span>
-              {q.steps.length > 1 && <span className="tag tag-steps">{q.steps.length}ステップ</span>}
+              {q.type === "table" && <span className="tag tag-steps">表形式</span>}
+              {q.type === "command" && q.steps.length > 1 && (
+                <span className="tag tag-steps">{q.steps.length}ステップ</span>
+              )}
               <QuestionText text={q.question} className="question-preview" />
-              {(practiceId !== q.id || practiceResult) && (
-                <div className="muted mono" style={{ marginTop: 4 }}>
-                  正解: {q.steps.map((s) => s.answers.join(" / ")).join(" → ")}
-                </div>
+              {q.type === "table" ? (
+                <QuestionTable
+                  table={q.table}
+                  mode={practiceId !== q.id || practiceResult ? "answers" : "preview"}
+                />
+              ) : (
+                (practiceId !== q.id || practiceResult) && (
+                  <div className="muted mono" style={{ marginTop: 4 }}>
+                    正解: {q.steps.map((s) => s.answers.join(" / ")).join(" → ")}
+                  </div>
+                )
               )}
               {q.explanation && (practiceId !== q.id || practiceResult) && (
                 <div className="muted" style={{ marginTop: 4 }}>
@@ -388,20 +587,34 @@ export default function AdminPage() {
 
               {practiceId === q.id && (
                 <div className="practice-panel">
-                  <div className="field">
-                    <label htmlFor={`practice-${q.id}`}>
-                      {q.steps.length > 1 ? "回答を入力（1行に1コマンドずつ）" : "回答を入力"}
-                    </label>
-                    <textarea
-                      id={`practice-${q.id}`}
-                      className="mono"
-                      rows={q.steps.length > 1 ? Math.min(q.steps.length, 6) : 1}
-                      autoFocus
-                      value={practiceAnswer}
-                      onChange={(e) => setPracticeAnswer(e.target.value)}
-                      disabled={!!practiceResult}
-                    />
-                  </div>
+                  {q.type === "table" ? (
+                    <div className="field">
+                      <label>表の空欄に回答を入力</label>
+                      <QuestionTable
+                        table={q.table}
+                        mode={practiceResult ? "answers" : "input"}
+                        values={practiceTableValues}
+                        onChange={(key, value) =>
+                          setPracticeTableValues((v) => ({ ...v, [key]: value }))
+                        }
+                      />
+                    </div>
+                  ) : (
+                    <div className="field">
+                      <label htmlFor={`practice-${q.id}`}>
+                        {q.steps.length > 1 ? "回答を入力（1行に1コマンドずつ）" : "回答を入力"}
+                      </label>
+                      <textarea
+                        id={`practice-${q.id}`}
+                        className="mono"
+                        rows={q.steps.length > 1 ? Math.min(q.steps.length, 6) : 1}
+                        autoFocus
+                        value={practiceAnswer}
+                        onChange={(e) => setPracticeAnswer(e.target.value)}
+                        disabled={!!practiceResult}
+                      />
+                    </div>
+                  )}
                   {!practiceResult ? (
                     <button type="button" className="btn btn-primary" onClick={() => submitPractice(q)}>
                       確認する
@@ -411,17 +624,19 @@ export default function AdminPage() {
                       <div className={`feedback ${practiceResult.correct ? "correct" : "wrong"}`}>
                         {practiceResult.correct ? "正解です！" : "不正解です。"}
                       </div>
-                      <div className="step-feedback">
-                        {practiceResult.stepResults.map((r) => (
-                          <div className="step-feedback-row" key={r.index}>
-                            <span className={`history-mark ${r.correct ? "correct" : "wrong"}`}>
-                              {r.correct ? "⚪︎" : "×"}
-                            </span>
-                            <span className="step-feedback-text">{r.userLine || "(未入力)"}</span>
-                            <span className="muted">→ 正解: {r.expected.join(" / ")}</span>
-                          </div>
-                        ))}
-                      </div>
+                      {q.type === "command" && (
+                        <div className="step-feedback">
+                          {practiceResult.stepResults.map((r) => (
+                            <div className="step-feedback-row" key={r.index}>
+                              <span className={`history-mark ${r.correct ? "correct" : "wrong"}`}>
+                                {r.correct ? "⚪︎" : "×"}
+                              </span>
+                              <span className="step-feedback-text">{r.userLine || "(未入力)"}</span>
+                              <span className="muted">→ 正解: {r.expected.join(" / ")}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       <div className="question-actions">
                         <button type="button" className="btn" onClick={retryPractice}>
                           もう一度

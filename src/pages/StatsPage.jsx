@@ -5,6 +5,7 @@ import { computeOverallStats, computeWrongQuestionIds, computeQuestionHistory } 
 import { importanceClassName } from "../utils/importance.js";
 import { toPlainSummary } from "../utils/questionText.js";
 import QuestionText from "../components/QuestionText.jsx";
+import QuestionTable from "../components/QuestionTable.jsx";
 
 const HISTORY_PAGE_SIZE = 10;
 
@@ -115,11 +116,17 @@ export default function StatsPage() {
             <div className="question-list-item" key={q.id}>
               <span className="tag">{q.category}</span>
               <span className={`tag ${importanceClassName(q.importance)}`}>重要度: {q.importance}</span>
-              {q.steps.length > 1 && <span className="tag tag-steps">{q.steps.length}ステップ</span>}
+              {q.type !== "table" && q.steps.length > 1 && (
+                <span className="tag tag-steps">{q.steps.length}ステップ</span>
+              )}
               <QuestionText text={q.question} className="question-preview" />
-              <div className="muted mono" style={{ marginTop: 4 }}>
-                正解: {q.steps.map((s) => s.answers.join(" / ")).join(" → ")}
-              </div>
+              {q.type === "table" ? (
+                <QuestionTable table={q.table} mode="answers" />
+              ) : (
+                <div className="muted mono" style={{ marginTop: 4 }}>
+                  正解: {q.steps.map((s) => s.answers.join(" / ")).join(" → ")}
+                </div>
+              )}
               <div className="question-actions">
                 <button className="btn" onClick={() => navigate(`/admin?edit=${q.id}`)}>
                   編集

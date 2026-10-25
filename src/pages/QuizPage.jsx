@@ -1,11 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
-import { loadQuestions, loadAttempts, recordAttempt, checkSteps, getCategories } from "../utils/storage.js";
+import {
+  loadQuestions,
+  loadAttempts,
+  recordAttempt,
+  checkSteps,
+  checkTable,
+  getCategories,
+} from "../utils/storage.js";
 import {
   computeLastSessionWrongQuestionIds,
   computeLowAccuracyQuestionIds,
 } from "../utils/stats.js";
 import { importanceClassName } from "../utils/importance.js";
 import QuestionText from "../components/QuestionText.jsx";
+import QuestionTable from "../components/QuestionTable.jsx";
 
 function shuffle(array) {
   const copy = [...array];
@@ -56,6 +64,7 @@ export default function QuizPage() {
   );
   const [currentIndex, setCurrentIndex] = useState(0);
   const [userAnswer, setUserAnswer] = useState("");
+  const [tableAnswers, setTableAnswers] = useState({});
   const [submitted, setSubmitted] = useState(false);
   const [lastResult, setLastResult] = useState(null);
   const [sessionCorrectCount, setSessionCorrectCount] = useState(0);
@@ -91,6 +100,10 @@ export default function QuizPage() {
     if (checked) setSelectAllCategories(false);
   }
 
+  function toggleLowAccuracyOnly(checked) {
+    setLowAccuracyOnly(checked);
+  }
+
   function startQuiz() {
     let pool = categoryFilteredQuestions;
     if (wrongOnly) {
@@ -108,6 +121,7 @@ export default function QuizPage() {
     setQuizSessionId(crypto.randomUUID());
     setCurrentIndex(0);
     setUserAnswer("");
+    setTableAnswers({});
     setSubmitted(false);
     setSessionCorrectCount(0);
     setSessionMistakes([]);
@@ -116,7 +130,8 @@ export default function QuizPage() {
   function submitAnswer() {
     if (submitted) return;
     const current = sessionQuestions[currentIndex];
-    const result = checkSteps(userAnswer, current.steps);
+    const result =
+      current.type === "table" ? checkTable(tableAnswers, current.table) : checkSteps(userAnswer, current.steps);
     setLastResult(result);
     setSubmitted(true);
     if (result.correct) {
@@ -128,7 +143,7 @@ export default function QuizPage() {
       questionId: current.id,
       category: current.category,
       correct: result.correct,
-      userAnswer,
+      userAnswer: current.type === "table" ? JSON.stringify(tableAnswers) : userAnswer,
       sessionId: quizSessionId,
     });
   }
@@ -148,6 +163,7 @@ export default function QuizPage() {
   function handleNext() {
     setCurrentIndex((i) => i + 1);
     setUserAnswer("");
+    setTableAnswers({});
     setSubmitted(false);
     setLastResult(null);
   }
@@ -213,7 +229,7 @@ export default function QuizPage() {
               <input
                 type="checkbox"
                 checked={lowAccuracyOnly}
-                onChange={(e) => setLowAccuracyOnly(e.target.checked)}
+                onChange={(e) => toggleLowAccuracyOnly(e.target.checked)}
               />
               正解率が低い問題のみ（
               <input
@@ -308,9 +324,13 @@ export default function QuizPage() {
                 <span className="tag">{q.category}</span>
                 <span className={`tag ${importanceClassName(q.importance)}`}>重要度: {q.importance}</span>
                 <QuestionText text={q.question} className="question-preview" />
-                <div className="muted mono" style={{ marginTop: 4 }}>
-                  正解: {q.steps.map((s) => s.answers.join(" / ")).join(" → ")}
-                </div>
+                {q.type === "table" ? (
+                  <QuestionTable table={q.table} mode="answers" />
+                ) : (
+                  <div className="muted mono" style={{ marginTop: 4 }}>
+                    正解: {q.steps.map((s) => s.answers.join(" / ")).join(" → ")}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -320,7 +340,7 @@ export default function QuizPage() {
   }
 
   const current = sessionQuestions[currentIndex];
-  const isMultiStep = current.steps.length > 1;
+  const isMultiStep = current.type === "command" && current.steps.length > 1;
 
   return (
     <div>
@@ -342,23 +362,35 @@ export default function QuizPage() {
         <QuestionText text={current.question} className="quiz-question" />
 
         <form onSubmit={handleSubmitAnswer}>
-          <div className="field">
-            <label htmlFor="answer">
-              {isMultiStep
-                ? "回答を入力（1行に1コマンドずつ、モード移動の順番どおりに入力）"
-                : "回答を入力"}
-            </label>
-            <textarea
-              id="answer"
-              className="mono"
-              rows={isMultiStep ? Math.min(current.steps.length, 8) : 1}
-              autoFocus
-              value={userAnswer}
-              onChange={(e) => setUserAnswer(e.target.value)}
-              onKeyDown={handleTextareaKeyDown}
-              disabled={submitted}
-            />
-          </div>
+          {current.type === "table" ? (
+            <div className="field">
+              <label>表の空欄に回答を入力</label>
+              <QuestionTable
+                table={current.table}
+                mode={submitted ? "answers" : "input"}
+                values={tableAnswers}
+                onChange={(key, value) => setTableAnswers((v) => ({ ...v, [key]: value }))}
+              />
+            </div>
+          ) : (
+            <div className="field">
+              <label htmlFor="answer">
+                {isMultiStep
+                  ? "回答を入力（1行に1コマンドずつ、モード移動の順番どおりに入力）"
+                  : "回答を入力"}
+              </label>
+              <textarea
+                id="answer"
+                className="mono"
+                rows={isMultiStep ? Math.min(current.steps.length, 8) : 1}
+                autoFocus
+                value={userAnswer}
+                onChange={(e) => setUserAnswer(e.target.value)}
+                onKeyDown={handleTextareaKeyDown}
+                disabled={submitted}
+              />
+            </div>
+          )}
           {!submitted && (
             <button type="submit" className="btn btn-primary">
               回答する
@@ -372,6 +404,7 @@ export default function QuizPage() {
               {lastResult.correct ? "正解です！" : "不正解です。"}
             </div>
 
+            {current.type === "command" && (
             <div className="step-feedback">
               {lastResult.stepResults.map((r) => (
                 <div className="step-feedback-row" key={r.index}>
@@ -388,6 +421,7 @@ export default function QuizPage() {
                 </div>
               )}
             </div>
+            )}
 
             {current.explanation && (
               <div className="muted" style={{ marginTop: 10 }}>

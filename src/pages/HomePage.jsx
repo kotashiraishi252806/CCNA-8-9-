@@ -39,6 +39,16 @@ export default function HomePage() {
           <Link to="/quiz" className="btn">出題を始める</Link>
         </div>
       </div>
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <h3>ネットワーク構築演習</h3>
+        <p className="muted">
+          仮想のネットワーク上で機器をつなぎ、IPアドレスを設定して、実際に通信できるまでの流れを体験できます。
+        </p>
+        <div className="question-actions">
+          <Link to="/netlab" className="btn">演習を始める</Link>
+        </div>
+      </div>
     </div>
   );
 }
