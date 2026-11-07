@@ -899,3 +899,55 @@ label {
 .nl-trace-warn .nl-trace-icon {
   color: var(--danger);
 }
+
+.question-status-bar {
+  position: sticky;
+  top: var(--app-header-height, 0px);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.favorite-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.favorite-toggle.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.answer-history {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  min-width: 0;
+}
+
+.answer-history-marks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 4px;
+}
+
+.answer-history .history-mark {
+  width: auto;
+}
+
+.answer-history-count {
+  font-size: 13px;
+  white-space: nowrap;
+}

@@ -6,14 +6,27 @@ import {
   checkSteps,
   checkTable,
   getCategories,
+  loadQuizSession,
+  saveQuizSession,
+  clearQuizSession,
+  loadFavoriteIds,
+  toggleFavorite,
 } from "../utils/storage.js";
 import {
   computeLastSessionWrongQuestionIds,
   computeLowAccuracyQuestionIds,
+  computeQuestionHistory,
 } from "../utils/stats.js";
 import { importanceClassName } from "../utils/importance.js";
 import QuestionText from "../components/QuestionText.jsx";
 import QuestionTable from "../components/QuestionTable.jsx";
+import AnswerHistoryMarks from "../components/AnswerHistoryMarks.jsx";
+
+// Keeps the sticky bar to a line or two; the stats page shows the full history.
+const STATUS_BAR_HISTORY_LIMIT = 20;
+
+const WEAK_MIN_ATTEMPTS = 5;
+const WEAK_ACCURACY_THRESHOLD = 50;
 
 function shuffle(array) {
   const copy = [...array];
@@ -24,7 +37,7 @@ function shuffle(array) {
   return copy;
 }
 
-export default function QuizPage() {
+export default function QuizPage({ weakOnly = false }) {
   const [allQuestions, setAllQuestions] = useState(() => loadQuestions());
   const [categories, setCategories] = useState(() => getCategories());
 
@@ -35,6 +48,7 @@ export default function QuizPage() {
     function refreshQuestions() {
       setAllQuestions(loadQuestions());
       setCategories(getCategories());
+      setFavoriteIds(new Set(loadFavoriteIds()));
     }
     window.addEventListener("focus", refreshQuestions);
     return () => window.removeEventListener("focus", refreshQuestions);
@@ -43,6 +57,8 @@ export default function QuizPage() {
   const [selectAllCategories, setSelectAllCategories] = useState(true);
   const [selectedCategories, setSelectedCategories] = useState(() => new Set());
   const [wrongOnly, setWrongOnly] = useState(false);
+  const [favoriteOnly, setFavoriteOnly] = useState(false);
+  const [favoriteIds, setFavoriteIds] = useState(() => new Set(loadFavoriteIds()));
   const [lowAccuracyOnly, setLowAccuracyOnly] = useState(false);
   const [lowAccuracyThreshold, setLowAccuracyThreshold] = useState(50);
   const [randomLimitOnly, setRandomLimitOnly] = useState(false);
@@ -62,6 +78,11 @@ export default function QuizPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [lowAccuracyThreshold, statsRefreshKey]
   );
+  const weakIds = useMemo(
+    () => new Set(computeLowAccuracyQuestionIds(loadAttempts(), WEAK_ACCURACY_THRESHOLD, WEAK_MIN_ATTEMPTS)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [statsRefreshKey]
+  );
   const [currentIndex, setCurrentIndex] = useState(0);
   const [userAnswer, setUserAnswer] = useState("");
   const [tableAnswers, setTableAnswers] = useState({});
@@ -69,6 +90,56 @@ export default function QuizPage() {
   const [lastResult, setLastResult] = useState(null);
   const [sessionCorrectCount, setSessionCorrectCount] = useState(0);
   const [sessionMistakes, setSessionMistakes] = useState([]);
+  const [savedSession, setSavedSession] = useState(() => loadQuizSession());
+  // submitted flips in the same update as recordAttempt, so the new mark shows right away.
+  const questionHistory = useMemo(
+    () => computeQuestionHistory(loadAttempts()),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sessionQuestions, submitted]
+  );
+
+  useEffect(() => {
+    if (!sessionQuestions) return;
+    if (currentIndex >= sessionQuestions.length) {
+      clearQuizSession();
+      return;
+    }
+    saveQuizSession({
+      sessionId: quizSessionId,
+      questionIds: sessionQuestions.map((q) => q.id),
+      currentIndex,
+      correctCount: sessionCorrectCount,
+      mistakeIds: sessionMistakes.map((q) => q.id),
+      userAnswer,
+      tableAnswers,
+      submitted,
+      lastResult,
+    });
+  }, [sessionQuestions, quizSessionId, currentIndex, sessionCorrectCount, sessionMistakes, userAnswer, tableAnswers, submitted, lastResult]);
+
+  function resumeSession() {
+    const s = savedSession;
+    const byId = new Map(allQuestions.map((q) => [q.id, q]));
+    // Questions deleted since the session was saved are skipped.
+    const questions = s.questionIds.map((id) => byId.get(id)).filter(Boolean);
+    const index = s.questionIds.slice(0, s.currentIndex).filter((id) => byId.has(id)).length;
+    const currentStillExists = byId.has(s.questionIds[s.currentIndex]);
+    setSessionQuestions(questions);
+    setQuizSessionId(s.sessionId);
+    setCurrentIndex(index);
+    setSessionCorrectCount(s.correctCount);
+    setSessionMistakes(s.mistakeIds.map((id) => byId.get(id)).filter(Boolean));
+    setUserAnswer(currentStillExists ? s.userAnswer : "");
+    setTableAnswers(currentStillExists ? s.tableAnswers : {});
+    setSubmitted(currentStillExists && s.submitted);
+    setLastResult(currentStillExists ? s.lastResult : null);
+    setSavedSession(null);
+  }
+
+  function discardSavedSession() {
+    clearQuizSession();
+    setSavedSession(null);
+  }
 
   // "すべて" and no-category-selected behave the same way, so unchecking "すべて"
   // to make room for "苦手問題のみ" doesn't silently narrow the pool to nothing.
@@ -106,8 +177,14 @@ export default function QuizPage() {
 
   function startQuiz() {
     let pool = categoryFilteredQuestions;
+    if (weakOnly) {
+      pool = pool.filter((q) => weakIds.has(q.id));
+    }
     if (wrongOnly) {
       pool = pool.filter((q) => wrongIds.has(q.id));
+    }
+    if (favoriteOnly) {
+      pool = pool.filter((q) => favoriteIds.has(q.id));
     }
     if (lowAccuracyOnly) {
       const lowIds = new Set(computeLowAccuracyQuestionIds(loadAttempts(), lowAccuracyThreshold));
@@ -125,6 +202,7 @@ export default function QuizPage() {
     setSubmitted(false);
     setSessionCorrectCount(0);
     setSessionMistakes([]);
+    setSavedSession(null);
   }
 
   function submitAnswer() {
@@ -148,6 +226,10 @@ export default function QuizPage() {
     });
   }
 
+  function handleToggleFavorite(id) {
+    setFavoriteIds(new Set(toggleFavorite(id)));
+  }
+
   function handleSubmitAnswer(e) {
     e.preventDefault();
     submitAnswer();
@@ -169,6 +251,7 @@ export default function QuizPage() {
   }
 
   function handleRestart() {
+    clearQuizSession();
     setSessionQuestions(null);
     setStatsRefreshKey((k) => k + 1);
   }
@@ -184,10 +267,47 @@ export default function QuizPage() {
     );
   }
 
+  const savedSessionCard = savedSession && (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div style={{ marginBottom: 12 }}>
+        途中で終了した出題があります（問題 {savedSession.currentIndex + 1} /{" "}
+        {savedSession.questionIds.length}、正解 {savedSession.correctCount}問）
+      </div>
+      <div className="question-actions">
+        <button className="btn btn-primary" onClick={resumeSession}>
+          続きから再開
+        </button>
+        <button className="btn" onClick={discardSavedSession}>
+          破棄する
+        </button>
+      </div>
+    </div>
+  );
+
+  if (!sessionQuestions && weakOnly) {
+    const weakCount = allQuestions.filter((q) => weakIds.has(q.id)).length;
+    return (
+      <div>
+        <h1>弱点出題</h1>
+        {savedSessionCard}
+        <div className="card">
+          <div className="field">
+            {WEAK_MIN_ATTEMPTS}回以上回答して、正答率が{WEAK_ACCURACY_THRESHOLD}%未満の問題を出題します（
+            {weakCount}問）
+          </div>
+          <button className="btn btn-primary" onClick={startQuiz} disabled={weakCount === 0}>
+            出題を開始
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (!sessionQuestions) {
     return (
       <div>
         <h1>出題</h1>
+        {savedSessionCard}
         <div className="card">
           <div className="field">
             <label>カテゴリを選択</label>
@@ -221,6 +341,18 @@ export default function QuizPage() {
               />
               苦手問題のみ（前回間違えた問題、
               {categoryFilteredQuestions.filter((q) => wrongIds.has(q.id)).length}
+              問）
+            </label>
+          </div>
+          <div className="field">
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={favoriteOnly}
+                onChange={(e) => setFavoriteOnly(e.target.checked)}
+              />
+              お気に入り問題のみ（
+              {categoryFilteredQuestions.filter((q) => favoriteIds.has(q.id)).length}
               問）
             </label>
           </div>
@@ -340,7 +472,7 @@ export default function QuizPage() {
   }
 
   const current = sessionQuestions[currentIndex];
-  const isMultiStep = current.type === "command" && current.steps.length > 1;
+  const isFavorite = favoriteIds.has(current.id);
 
   return (
     <div>
@@ -356,6 +488,24 @@ export default function QuizPage() {
       </div>
 
       <div className="card">
+        <div className="question-status-bar">
+          {submitted ? (
+            <button
+              type="button"
+              className={`btn favorite-toggle ${isFavorite ? "active" : ""}`}
+              aria-pressed={isFavorite}
+              onClick={() => handleToggleFavorite(current.id)}
+            >
+              {isFavorite ? "★ お気に入り登録済み" : "☆ お気に入りに登録"}
+            </button>
+          ) : (
+            isFavorite && <span className="favorite-label">★ お気に入り</span>
+          )}
+          <AnswerHistoryMarks
+            history={questionHistory.get(current.id) ?? []}
+            limit={STATUS_BAR_HISTORY_LIMIT}
+          />
+        </div>
         <span className={`tag ${importanceClassName(current.importance)}`}>
           重要度: {current.importance}
         </span>
@@ -375,14 +525,13 @@ export default function QuizPage() {
           ) : (
             <div className="field">
               <label htmlFor="answer">
-                {isMultiStep
-                  ? "回答を入力（1行に1コマンドずつ、モード移動の順番どおりに入力）"
-                  : "回答を入力"}
+                回答を入力（1行に1コマンドずつ、モード移動の順番どおりに入力）
               </label>
+              {/* Fixed size for every question so the box doesn't hint at the number of lines. */}
               <textarea
                 id="answer"
                 className="mono"
-                rows={isMultiStep ? Math.min(current.steps.length, 8) : 1}
+                rows={8}
                 autoFocus
                 value={userAnswer}
                 onChange={(e) => setUserAnswer(e.target.value)}

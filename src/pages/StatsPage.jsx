@@ -1,11 +1,17 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { loadQuestions, loadAttempts, clearAttempts } from "../utils/storage.js";
-import { computeOverallStats, computeWrongQuestionIds, computeQuestionHistory } from "../utils/stats.js";
+import { loadQuestions, loadAttempts, clearAttempts, loadFavoriteIds, toggleFavorite } from "../utils/storage.js";
+import {
+  computeOverallStats,
+  computeWrongQuestionIds,
+  computeQuestionHistory,
+  computeCategoryAccuracy,
+} from "../utils/stats.js";
 import { importanceClassName } from "../utils/importance.js";
 import { toPlainSummary } from "../utils/questionText.js";
 import QuestionText from "../components/QuestionText.jsx";
 import QuestionTable from "../components/QuestionTable.jsx";
+import AnswerHistoryMarks from "../components/AnswerHistoryMarks.jsx";
 
 const HISTORY_PAGE_SIZE = 10;
 
@@ -55,6 +61,8 @@ export default function StatsPage() {
   const [attempts, setAttempts] = useState(() => loadAttempts());
   const [historyLimit, setHistoryLimit] = useState(HISTORY_PAGE_SIZE);
   const [questionHistoryLimit, setQuestionHistoryLimit] = useState(HISTORY_PAGE_SIZE);
+  const [favoriteIds, setFavoriteIds] = useState(() => new Set(loadFavoriteIds()));
+  const [favoriteLimit, setFavoriteLimit] = useState(HISTORY_PAGE_SIZE);
   const questions = useMemo(() => loadQuestions(), []);
   const questionById = useMemo(
     () => new Map(questions.map((q) => [q.id, q])),
@@ -63,6 +71,11 @@ export default function StatsPage() {
 
   const overall = useMemo(() => computeOverallStats(attempts), [attempts]);
 
+  const categoryAccuracy = useMemo(
+    () => computeCategoryAccuracy(attempts, questionById),
+    [attempts, questionById]
+  );
+
   const wrongQuestions = useMemo(() => {
     const wrongIds = computeWrongQuestionIds(attempts);
     return wrongIds.map((id) => questionById.get(id)).filter(Boolean);
@@ -70,8 +83,22 @@ export default function StatsPage() {
 
   const sessionGroups = useMemo(() => groupBySession(attempts), [attempts]);
 
+  const historyByQuestion = useMemo(() => computeQuestionHistory(attempts), [attempts]);
+
+  // Most-missed first; favorites that have never been answered go last.
+  const favoriteHistories = useMemo(
+    () =>
+      questions
+        .filter((q) => favoriteIds.has(q.id))
+        .map((question) => {
+          const history = historyByQuestion.get(question.id) ?? [];
+          return { question, history, wrongCount: history.filter((a) => !a.correct).length };
+        })
+        .sort((a, b) => b.wrongCount - a.wrongCount || b.history.length - a.history.length),
+    [questions, favoriteIds, historyByQuestion]
+  );
+
   const questionHistories = useMemo(() => {
-    const historyByQuestion = computeQuestionHistory(attempts);
     return [...historyByQuestion.entries()]
       .map(([questionId, history]) => ({ questionId, question: questionById.get(questionId), history }))
       .filter((h) => h.question)
@@ -80,7 +107,7 @@ export default function StatsPage() {
           new Date(b.history[b.history.length - 1].answeredAt) -
           new Date(a.history[a.history.length - 1].answeredAt)
       );
-  }, [attempts, questionById]);
+  }, [historyByQuestion, questionById]);
 
   function handleReset() {
     if (!confirm("学習履歴（正答率・間違えた問題）をすべてリセットしますか？")) return;
@@ -105,6 +132,79 @@ export default function StatsPage() {
             <div className="label">正解数</div>
           </div>
         </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <h3>章別正答率</h3>
+        {categoryAccuracy.length === 0 ? (
+          <div className="empty-state">まだ回答履歴がありません。</div>
+        ) : (
+          <div className="session-table-wrap" style={{ marginTop: 0 }}>
+            <table className="session-table">
+              <thead>
+                <tr>
+                  <th>章</th>
+                  <th>正解/回答</th>
+                  <th>正答率</th>
+                </tr>
+              </thead>
+              <tbody>
+                {categoryAccuracy.map((c, i) => (
+                  <tr key={c.category}>
+                    <td>
+                      {c.category}
+                      {i === 0 && categoryAccuracy.length > 1 && (
+                        <span className="tag" style={{ marginLeft: 8 }}>最低</span>
+                      )}
+                    </td>
+                    <td>
+                      {c.correct}/{c.total}
+                    </td>
+                    <td style={i === 0 && categoryAccuracy.length > 1 ? { color: "var(--danger)", fontWeight: 700 } : undefined}>
+                      {c.accuracy}%
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <h3>お気に入り問題の正誤推移（{favoriteHistories.length}件）</h3>
+        {favoriteHistories.length === 0 ? (
+          <div className="empty-state">お気に入りの問題はまだありません。回答後の画面から登録できます。</div>
+        ) : (
+          <>
+            {favoriteHistories.slice(0, favoriteLimit).map(({ question, history }) => (
+              <div className="question-list-item" key={question.id}>
+                <span className="tag">{question.category}</span>
+                <QuestionText text={question.question} className="question-preview" />
+                <div style={{ marginTop: 8 }}>
+                  <AnswerHistoryMarks history={history} />
+                </div>
+                <div className="question-actions">
+                  <button
+                    className="btn"
+                    onClick={() => setFavoriteIds(new Set(toggleFavorite(question.id)))}
+                  >
+                    お気に入り解除
+                  </button>
+                </div>
+              </div>
+            ))}
+            {favoriteLimit < favoriteHistories.length && (
+              <button
+                className="btn"
+                style={{ marginTop: 12 }}
+                onClick={() => setFavoriteLimit((n) => n + HISTORY_PAGE_SIZE)}
+              >
+                もっと見る
+              </button>
+            )}
+          </>
+        )}
       </div>
 
       <div className="card" style={{ marginTop: 16 }}>

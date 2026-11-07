@@ -19,12 +19,30 @@ export function computeQuestionAccuracy(attempts) {
   return byQuestion;
 }
 
+// Accuracy per category (chapter) across all attempts, lowest accuracy first.
+// The question's current category wins over the one stored on the attempt, so
+// re-categorized questions are counted under their new chapter.
+export function computeCategoryAccuracy(attempts, questionById) {
+  const byCategory = new Map();
+  for (const a of attempts) {
+    const category = questionById.get(a.questionId)?.category || a.category || "（未分類）";
+    const entry = byCategory.get(category) || { category, correct: 0, total: 0 };
+    entry.total += 1;
+    if (a.correct) entry.correct += 1;
+    byCategory.set(category, entry);
+  }
+  return [...byCategory.values()]
+    .map((e) => ({ ...e, accuracy: Math.round((e.correct / e.total) * 100) }))
+    .sort((a, b) => a.correct / a.total - b.correct / b.total || b.total - a.total);
+}
+
 // Questions whose overall accuracy (across all attempts) is below thresholdPercent,
-// ordered from lowest accuracy to highest.
-export function computeLowAccuracyQuestionIds(attempts, thresholdPercent) {
+// ordered from lowest accuracy to highest. Questions answered fewer than minAttempts
+// times are left out.
+export function computeLowAccuracyQuestionIds(attempts, thresholdPercent, minAttempts = 1) {
   const accuracy = computeQuestionAccuracy(attempts);
   return [...accuracy.entries()]
-    .filter(([, { correct, total }]) => (correct / total) * 100 < thresholdPercent)
+    .filter(([, { correct, total }]) => total >= minAttempts && (correct / total) * 100 < thresholdPercent)
     .sort((a, b) => a[1].correct / a[1].total - b[1].correct / b[1].total)
     .map(([questionId]) => questionId);
 }

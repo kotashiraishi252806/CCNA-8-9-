@@ -4,7 +4,9 @@ import { Preferences } from "@capacitor/preferences";
 const QUESTIONS_KEY = "ccna_questions";
 const ATTEMPTS_KEY = "ccna_attempts";
 export const NETLAB_KEY = "ccna_netlab";
-const PERSISTED_KEYS = [QUESTIONS_KEY, ATTEMPTS_KEY, NETLAB_KEY];
+const QUIZ_SESSION_KEY = "ccna_quiz_session";
+const FAVORITES_KEY = "ccna_favorites";
+const PERSISTED_KEYS = [QUESTIONS_KEY, ATTEMPTS_KEY, NETLAB_KEY, QUIZ_SESSION_KEY, FAVORITES_KEY];
 
 // --- Native persistence ---
 // iOS may purge WebView localStorage, so in the native app the durable copy lives
@@ -100,11 +102,37 @@ export function updateQuestion(id, updates) {
 export function deleteQuestion(id) {
   const questions = loadQuestions().filter((q) => q.id !== id);
   saveQuestions(questions);
+  saveFavoriteIds(loadFavoriteIds().filter((favoriteId) => favoriteId !== id));
 }
 
 export function getCategories() {
   const questions = loadQuestions();
   return [...new Set(questions.map((q) => q.category).filter(Boolean))].sort();
+}
+
+// --- Favorites ---
+// An array of question ids. A favorite's answer history comes from the attempts,
+// so unfavoriting and favoriting again loses nothing.
+
+export function loadFavoriteIds() {
+  try {
+    const raw = localStorage.getItem(FAVORITES_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveFavoriteIds(ids) {
+  writeItem(FAVORITES_KEY, JSON.stringify(ids));
+}
+
+// Returns the updated ids.
+export function toggleFavorite(id) {
+  const ids = loadFavoriteIds();
+  const next = ids.includes(id) ? ids.filter((favoriteId) => favoriteId !== id) : [...ids, id];
+  saveFavoriteIds(next);
+  return next;
 }
 
 // --- Attempts / progress ---
@@ -137,6 +165,29 @@ export function recordAttempt(attempt) {
 
 export function clearAttempts() {
   saveAttempts([]);
+}
+
+// --- In-progress quiz session ---
+// Saved after every change so a closed tab/app can resume where it left off.
+// Shape: { sessionId, questionIds, currentIndex, correctCount, mistakeIds,
+//          userAnswer, tableAnswers, submitted, lastResult }
+
+export function loadQuizSession() {
+  try {
+    const raw = localStorage.getItem(QUIZ_SESSION_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveQuizSession(session) {
+  writeItem(QUIZ_SESSION_KEY, JSON.stringify(session));
+}
+
+export function clearQuizSession() {
+  localStorage.removeItem(QUIZ_SESSION_KEY);
+  if (isNative) Preferences.remove({ key: QUIZ_SESSION_KEY });
 }
 
 // --- Answer normalization / grading ---
