@@ -48,13 +48,54 @@ const DEFAULT_IMPORTANCE = "中";
 // table = { cells: cell[][] }, cell = { blank: boolean, text: string, answer: string }.
 // Non-blank cells display `text`; blank cells are filled in by the user and graded against `answer`.
 
+// Question shape (type "matching"): { id, category, question, type, matching, importance, explanation? }
+// matching = { headers: string[], rows: { left: string, answers: string[] }[], distractors: string[][] }.
+// Each row's left item is matched to one item in every answer column, so a question
+// with 2 answer columns relates 3 elements (e.g. protocol → layer → port).
+// headers[0] labels the left column and headers[c + 1] answer column c (may be empty).
+// Column c's choices are its distinct answers plus distractors[c] (choices that
+// match nothing), so one item may be the answer for several rows.
+// Older data stored { pairs: { left, right }[], distractors: string[] } (one answer
+// column); normalizeMatching() upgrades it on read.
+
+export function emptyMatchingRow(answerColumns = 1) {
+  return { left: "", answers: Array.from({ length: answerColumns }, () => "") };
+}
+
+function normalizeMatching(m) {
+  if (Array.isArray(m?.rows) && m.rows.length > 0) {
+    const columns = Math.max(1, ...m.rows.map((r) => r.answers?.length ?? 0));
+    const rows = m.rows.map((r) => ({
+      left: r.left ?? "",
+      answers: Array.from({ length: columns }, (_, c) => r.answers?.[c] ?? ""),
+    }));
+    const headers = Array.from({ length: columns + 1 }, (_, c) => m.headers?.[c] ?? "");
+    const distractors = Array.from({ length: columns }, (_, c) =>
+      Array.isArray(m.distractors?.[c]) ? m.distractors[c] : []
+    );
+    return { headers, rows, distractors };
+  }
+  if (Array.isArray(m?.pairs) && m.pairs.length > 0) {
+    return {
+      headers: ["", ""],
+      rows: m.pairs.map((p) => ({ left: p.left, answers: [p.right] })),
+      distractors: [Array.isArray(m.distractors) ? m.distractors : []],
+    };
+  }
+  return { headers: ["", ""], rows: [emptyMatchingRow()], distractors: [[]] };
+}
+
 export function emptyTableCell() {
   return { blank: false, text: "", answer: "" };
 }
 
 function normalizeQuestion(q) {
-  const type = q.type === "table" ? "table" : "command";
+  const type = ["table", "matching"].includes(q.type) ? q.type : "command";
   const importance = IMPORTANCE_LEVELS.includes(q.importance) ? q.importance : DEFAULT_IMPORTANCE;
+
+  if (type === "matching") {
+    return { ...q, type, matching: normalizeMatching(q.matching), importance };
+  }
 
   if (type === "table") {
     const table =
@@ -107,7 +148,10 @@ export function deleteQuestion(id) {
 
 export function getCategories() {
   const questions = loadQuestions();
-  return [...new Set(questions.map((q) => q.category).filter(Boolean))].sort();
+  // numeric: true so "2章" comes before "10章".
+  return [...new Set(questions.map((q) => q.category).filter(Boolean))].sort((a, b) =>
+    a.localeCompare(b, "ja", { numeric: true })
+  );
 }
 
 // --- Favorites ---
@@ -243,5 +287,27 @@ export function checkTable(userValues, table) {
 
   const correct = blanks.length > 0 && cellResults.every((r) => r.correct);
 
+  return { correct, cellResults };
+}
+
+// The choices of answer column `col`: each distinct answer once, plus distractors.
+export function matchingChoices(matching, col) {
+  return [
+    ...new Set([...matching.rows.map((r) => r.answers[col]), ...(matching.distractors[col] ?? [])].filter(Boolean)),
+  ];
+}
+
+// Grades a matching question. `userValues` maps "row-col" keys (col = answer
+// column index) to the choice the user picked.
+export function checkMatching(userValues, matching) {
+  const cellResults = [];
+  matching.rows.forEach((row, r) => {
+    row.answers.forEach((expected, c) => {
+      const key = `${r}-${c}`;
+      const userValue = userValues?.[key] ?? "";
+      cellResults.push({ row: r, col: c, key, userValue, correct: userValue === expected, expected });
+    });
+  });
+  const correct = cellResults.length > 0 && cellResults.every((r) => r.correct);
   return { correct, cellResults };
 }

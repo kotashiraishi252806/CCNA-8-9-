@@ -9,11 +9,14 @@ import {
   IMPORTANCE_LEVELS,
   checkSteps,
   checkTable,
+  checkMatching,
   emptyTableCell,
+  emptyMatchingRow,
 } from "../utils/storage.js";
 import { importanceClassName } from "../utils/importance.js";
 import QuestionText from "../components/QuestionText.jsx";
 import QuestionTable from "../components/QuestionTable.jsx";
+import MatchingQuestion from "../components/MatchingQuestion.jsx";
 
 const emptyForm = {
   category: "",
@@ -21,6 +24,7 @@ const emptyForm = {
   type: "command",
   steps: [{ answers: [""] }],
   table: { cells: [[emptyTableCell(), emptyTableCell()], [emptyTableCell(), emptyTableCell()]] },
+  matching: { headers: ["", ""], rows: [emptyMatchingRow(), emptyMatchingRow()], distractors: [[]] },
   importance: "中",
   explanation: "",
 };
@@ -34,7 +38,10 @@ export default function AdminPage() {
   const [practiceId, setPracticeId] = useState(null);
   const [practiceAnswer, setPracticeAnswer] = useState("");
   const [practiceTableValues, setPracticeTableValues] = useState({});
+  const [practiceMatchingValues, setPracticeMatchingValues] = useState({});
   const [practiceResult, setPracticeResult] = useState(null);
+  // Bumped on every open/retry so the practice table/matching reshuffles its order.
+  const [practiceRound, setPracticeRound] = useState(0);
 
   useEffect(() => {
     setQuestions(loadQuestions());
@@ -150,6 +157,77 @@ export default function AdminPage() {
     });
   }
 
+  function updateMatching(updater) {
+    setForm((f) => ({ ...f, matching: updater(f.matching) }));
+  }
+
+  function updateMatchingHeader(index, value) {
+    updateMatching((m) => ({ ...m, headers: m.headers.map((h, i) => (i === index ? value : h)) }));
+  }
+
+  function updateMatchingLeft(rowIndex, value) {
+    updateMatching((m) => ({
+      ...m,
+      rows: m.rows.map((r, ri) => (ri === rowIndex ? { ...r, left: value } : r)),
+    }));
+  }
+
+  function updateMatchingAnswer(rowIndex, col, value) {
+    updateMatching((m) => ({
+      ...m,
+      rows: m.rows.map((r, ri) =>
+        ri === rowIndex ? { ...r, answers: r.answers.map((a, ci) => (ci === col ? value : a)) } : r
+      ),
+    }));
+  }
+
+  function addMatchingRow() {
+    updateMatching((m) => ({ ...m, rows: [...m.rows, emptyMatchingRow(m.rows[0]?.answers.length ?? 1)] }));
+  }
+
+  function removeMatchingRow(rowIndex) {
+    updateMatching((m) => ({ ...m, rows: m.rows.filter((_, ri) => ri !== rowIndex) }));
+  }
+
+  function addMatchingColumn() {
+    updateMatching((m) => ({
+      headers: [...m.headers, ""],
+      rows: m.rows.map((r) => ({ ...r, answers: [...r.answers, ""] })),
+      distractors: [...m.distractors, []],
+    }));
+  }
+
+  function removeMatchingColumn(col) {
+    updateMatching((m) => ({
+      headers: m.headers.filter((_, i) => i !== col + 1),
+      rows: m.rows.map((r) => ({ ...r, answers: r.answers.filter((_, ci) => ci !== col) })),
+      distractors: m.distractors.filter((_, ci) => ci !== col),
+    }));
+  }
+
+  function updateDistractor(col, index, value) {
+    updateMatching((m) => ({
+      ...m,
+      distractors: m.distractors.map((list, ci) =>
+        ci === col ? list.map((d, i) => (i === index ? value : d)) : list
+      ),
+    }));
+  }
+
+  function addDistractor(col) {
+    updateMatching((m) => ({
+      ...m,
+      distractors: m.distractors.map((list, ci) => (ci === col ? [...list, ""] : list)),
+    }));
+  }
+
+  function removeDistractor(col, index) {
+    updateMatching((m) => ({
+      ...m,
+      distractors: m.distractors.map((list, ci) => (ci === col ? list.filter((_, i) => i !== index) : list)),
+    }));
+  }
+
   function resetForm() {
     setForm(emptyForm);
     setEditingId(null);
@@ -167,7 +245,37 @@ export default function AdminPage() {
     }
 
     let payload;
-    if (form.type === "table") {
+    if (form.type === "matching") {
+      const rows = form.matching.rows
+        .map((r) => ({ left: r.left.trim(), answers: r.answers.map((a) => a.trim()) }))
+        .filter((r) => r.left || r.answers.some(Boolean));
+      if (rows.length < 2) {
+        alert("行を2つ以上入力してください。");
+        return;
+      }
+      if (rows.some((r) => !r.left || r.answers.some((a) => !a))) {
+        alert("すべての行で、左の項目と各列の正解を入力してください。");
+        return;
+      }
+      if (new Set(rows.map((r) => r.left)).size !== rows.length) {
+        alert("左の項目が重複しています。");
+        return;
+      }
+      const headers = form.matching.headers.map((h) => h.trim());
+      const distractors = form.matching.distractors.map((list, c) =>
+        [...new Set(list.map((d) => d.trim()).filter(Boolean))].filter(
+          (d) => !rows.some((r) => r.answers[c] === d)
+        )
+      );
+      payload = {
+        category,
+        question,
+        type: "matching",
+        matching: { headers, rows, distractors },
+        importance: form.importance,
+        explanation,
+      };
+    } else if (form.type === "table") {
       const cells = form.table.cells.map((row) =>
         row.map((cell) =>
           cell.blank
@@ -215,9 +323,10 @@ export default function AdminPage() {
     setForm({
       category: q.category,
       question: q.question,
-      type: q.type === "table" ? "table" : "command",
+      type: q.type,
       steps: steps.map((s) => ({ answers: s.answers.length ? s.answers : [""] })),
       table: q.table && q.table.cells.length ? q.table : emptyForm.table,
+      matching: q.matching ?? emptyForm.matching,
       importance: q.importance || "中",
       explanation: q.explanation || "",
     });
@@ -233,9 +342,11 @@ export default function AdminPage() {
   }
 
   function openPractice(q) {
+    setPracticeRound((n) => n + 1);
     setPracticeId(q.id);
     setPracticeAnswer("");
     setPracticeTableValues({});
+    setPracticeMatchingValues({});
     setPracticeResult(null);
   }
 
@@ -243,10 +354,15 @@ export default function AdminPage() {
     setPracticeId(null);
     setPracticeAnswer("");
     setPracticeTableValues({});
+    setPracticeMatchingValues({});
     setPracticeResult(null);
   }
 
   function submitPractice(q) {
+    if (q.type === "matching") {
+      setPracticeResult(checkMatching(practiceMatchingValues, q.matching));
+      return;
+    }
     if (q.type === "table") {
       setPracticeResult(checkTable(practiceTableValues, q.table));
       return;
@@ -256,8 +372,10 @@ export default function AdminPage() {
   }
 
   function retryPractice() {
+    setPracticeRound((n) => n + 1);
     setPracticeAnswer("");
     setPracticeTableValues({});
+    setPracticeMatchingValues({});
     setPracticeResult(null);
   }
 
@@ -325,6 +443,15 @@ export default function AdminPage() {
                 onChange={() => setForm((f) => ({ ...f, type: "table" }))}
               />
               表の穴埋め
+            </label>
+            <label className="checkbox-label">
+              <input
+                type="radio"
+                name="question-type"
+                checked={form.type === "matching"}
+                onChange={() => setForm((f) => ({ ...f, type: "matching" }))}
+              />
+              対応問題
             </label>
           </div>
         </div>
@@ -492,6 +619,130 @@ export default function AdminPage() {
         </div>
         )}
 
+        {form.type === "matching" && (
+        <div className="field">
+          <label>
+            対応表（1行目は列の見出し（任意）。各行で左の項目と、各列の正解を入力します。同じ正解を複数の行で使えます。3要素以上の対応は「列を追加」）
+          </label>
+          <div className="question-actions" style={{ marginTop: 0, marginBottom: 10 }}>
+            <button type="button" className="btn" onClick={addMatchingRow}>
+              + 行を追加
+            </button>
+            <button type="button" className="btn" onClick={addMatchingColumn}>
+              + 列を追加
+            </button>
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table className="table-editor-grid">
+              <thead>
+                <tr>
+                  <td className="table-editor-cell">
+                    <input
+                      type="text"
+                      placeholder="見出し 例: プロトコル"
+                      value={form.matching.headers[0]}
+                      onChange={(e) => updateMatchingHeader(0, e.target.value)}
+                    />
+                  </td>
+                  {form.matching.headers.slice(1).map((h, c) => (
+                    <td className="table-editor-cell" key={c}>
+                      <input
+                        type="text"
+                        placeholder={`見出し 例: ${c === 0 ? "OSI層" : "ポート番号"}`}
+                        value={h}
+                        onChange={(e) => updateMatchingHeader(c + 1, e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-danger"
+                        style={{ marginTop: 6, fontSize: 12, padding: "4px 8px" }}
+                        onClick={() => removeMatchingColumn(c)}
+                        disabled={form.matching.headers.length <= 2}
+                      >
+                        列削除
+                      </button>
+                    </td>
+                  ))}
+                  <td />
+                </tr>
+              </thead>
+              <tbody>
+                {form.matching.rows.map((row, ri) => (
+                  <tr key={ri}>
+                    <td className="table-editor-cell">
+                      <input
+                        type="text"
+                        placeholder={ri === 0 ? "例: HTTP" : "左の項目"}
+                        value={row.left}
+                        onChange={(e) => updateMatchingLeft(ri, e.target.value)}
+                      />
+                    </td>
+                    {row.answers.map((a, c) => (
+                      <td className="table-editor-cell" key={c}>
+                        <input
+                          type="text"
+                          list={`matching-options-${c}`}
+                          placeholder="正解"
+                          value={a}
+                          onChange={(e) => updateMatchingAnswer(ri, c, e.target.value)}
+                        />
+                      </td>
+                    ))}
+                    <td>
+                      <button
+                        type="button"
+                        className="btn btn-danger"
+                        style={{ fontSize: 12, padding: "4px 8px" }}
+                        onClick={() => removeMatchingRow(ri)}
+                        disabled={form.matching.rows.length <= 2}
+                      >
+                        行削除
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {form.matching.distractors.map((_, c) => (
+            <datalist id={`matching-options-${c}`} key={c}>
+              {[...new Set(form.matching.rows.map((r) => r.answers[c].trim()).filter(Boolean))].map((v) => (
+                <option key={v} value={v} />
+              ))}
+            </datalist>
+          ))}
+
+          {form.matching.distractors.map((list, c) => (
+            <div key={c} style={{ marginTop: 16 }}>
+              <label>
+                ダミーの選択肢（任意）{form.matching.headers[c + 1] ? `：${form.matching.headers[c + 1]}` : form.matching.distractors.length > 1 ? `：列${c + 1}` : ""}
+              </label>
+              {list.map((d, i) => (
+                <div className="row" key={i} style={{ marginTop: 8, alignItems: "center" }}>
+                  <input
+                    type="text"
+                    placeholder="どの行にも対応しない選択肢"
+                    value={d}
+                    onChange={(e) => updateDistractor(c, i, e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-danger"
+                    style={{ flex: "0 0 auto" }}
+                    onClick={() => removeDistractor(c, i)}
+                  >
+                    削除
+                  </button>
+                </div>
+              ))}
+              <button type="button" className="btn" style={{ marginTop: 8 }} onClick={() => addDistractor(c)}>
+                + ダミーの選択肢を追加
+              </button>
+            </div>
+          ))}
+        </div>
+        )}
+
         <div className="field">
           <label htmlFor="explanation">解説（任意）</label>
           <textarea
@@ -540,11 +791,16 @@ export default function AdminPage() {
               <span className="tag">{q.category}</span>
               <span className={`tag ${importanceClassName(q.importance)}`}>重要度: {q.importance}</span>
               {q.type === "table" && <span className="tag tag-steps">表形式</span>}
+              {q.type === "matching" && <span className="tag tag-steps">対応問題</span>}
               {q.type === "command" && q.steps.length > 1 && (
                 <span className="tag tag-steps">{q.steps.length}ステップ</span>
               )}
               <QuestionText text={q.question} className="question-preview" />
-              {q.type === "table" ? (
+              {q.type === "matching" ? (
+                (practiceId !== q.id || practiceResult) && (
+                  <MatchingQuestion matching={q.matching} mode="answers" />
+                )
+              ) : q.type === "table" ? (
                 <QuestionTable
                   table={q.table}
                   mode={practiceId !== q.id || practiceResult ? "answers" : "preview"}
@@ -587,13 +843,37 @@ export default function AdminPage() {
 
               {practiceId === q.id && (
                 <div className="practice-panel">
-                  {q.type === "table" ? (
+                  {q.type === "matching" ? (
+                    <div className="field">
+                      <label>それぞれの項目に対応するものを選択</label>
+                      <MatchingQuestion
+                        key={practiceRound}
+                        randomize
+                        matching={q.matching}
+                        mode={practiceResult ? "result" : "input"}
+                        values={practiceMatchingValues}
+                        results={
+                          practiceResult?.cellResults &&
+                          Object.fromEntries(practiceResult.cellResults.map((r) => [r.key, r]))
+                        }
+                        onChange={(key, value) =>
+                          setPracticeMatchingValues((v) => ({ ...v, [key]: value }))
+                        }
+                      />
+                    </div>
+                  ) : q.type === "table" ? (
                     <div className="field">
                       <label>表の空欄に回答を入力</label>
                       <QuestionTable
+                        key={practiceRound}
+                        randomize
                         table={q.table}
-                        mode={practiceResult ? "answers" : "input"}
+                        mode={practiceResult ? "result" : "input"}
                         values={practiceTableValues}
+                        results={
+                          practiceResult?.cellResults &&
+                          Object.fromEntries(practiceResult.cellResults.map((r) => [r.key, r]))
+                        }
                         onChange={(key, value) =>
                           setPracticeTableValues((v) => ({ ...v, [key]: value }))
                         }

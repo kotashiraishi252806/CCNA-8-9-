@@ -47,6 +47,13 @@ export function computeLowAccuracyQuestionIds(attempts, thresholdPercent, minAtt
     .map(([questionId]) => questionId);
 }
 
+// Questions answered at least minAttempts times without a single mistake.
+export function computeMasteredQuestionIds(attempts, minAttempts) {
+  return [...computeQuestionAccuracy(attempts).entries()]
+    .filter(([, { correct, total }]) => total >= minAttempts && correct === total)
+    .map(([questionId]) => questionId);
+}
+
 export function computeWrongQuestionIds(attempts) {
   // Latest attempt per question (across all history) determines current mastery.
   const latestByQuestion = new Map();

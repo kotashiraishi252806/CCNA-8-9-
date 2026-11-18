@@ -448,6 +448,40 @@ label {
   font-weight: 600;
 }
 
+.fill-table-result {
+  vertical-align: top;
+}
+
+.fill-table-result > .history-mark {
+  width: auto;
+  margin-right: 6px;
+}
+
+.fill-table-result.correct {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.fill-table-result.wrong {
+  background: var(--danger-soft);
+}
+
+.fill-table-result-body {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fill-table-user {
+  color: var(--danger);
+  text-decoration: line-through;
+}
+
+.fill-table-expected {
+  color: var(--success);
+  font-weight: 600;
+}
+
 .fill-table-placeholder {
   color: var(--text-muted);
   text-align: center;
@@ -950,4 +984,34 @@ label {
 .answer-history-count {
   font-size: 13px;
   white-space: nowrap;
+}
+
+.matching-choices {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.matching-choice {
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-hover);
+  font-size: 13px;
+}
+
+.matching-left {
+  font-weight: 600;
+}
+
+.matching-table th {
+  text-align: left;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.matching-table select {
+  width: 100%;
 }

@@ -11,6 +11,7 @@ import { importanceClassName } from "../utils/importance.js";
 import { toPlainSummary } from "../utils/questionText.js";
 import QuestionText from "../components/QuestionText.jsx";
 import QuestionTable from "../components/QuestionTable.jsx";
+import MatchingQuestion from "../components/MatchingQuestion.jsx";
 import AnswerHistoryMarks from "../components/AnswerHistoryMarks.jsx";
 
 const HISTORY_PAGE_SIZE = 10;
@@ -216,11 +217,13 @@ export default function StatsPage() {
             <div className="question-list-item" key={q.id}>
               <span className="tag">{q.category}</span>
               <span className={`tag ${importanceClassName(q.importance)}`}>重要度: {q.importance}</span>
-              {q.type !== "table" && q.steps.length > 1 && (
+              {q.type === "command" && q.steps.length > 1 && (
                 <span className="tag tag-steps">{q.steps.length}ステップ</span>
               )}
               <QuestionText text={q.question} className="question-preview" />
-              {q.type === "table" ? (
+              {q.type === "matching" ? (
+                <MatchingQuestion matching={q.matching} mode="answers" />
+              ) : q.type === "table" ? (
                 <QuestionTable table={q.table} mode="answers" />
               ) : (
                 <div className="muted mono" style={{ marginTop: 4 }}>
